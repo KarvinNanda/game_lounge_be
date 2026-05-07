@@ -1,0 +1,29 @@
+# Environment
+.env
+.env.*
+!.env.example
+
+# Binary / build output
+/cmd/game_lounge_be
+/cmd/game_lounge_be.exe
+*.exe
+*.out
+*.test
+
+# Uploaded files (runtime-generated)
+/assets/
+/uploads/
+
+# Go workspace
+go.work
+go.work.sum
+
+# IDE & OS
+.vscode/
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
