@@ -539,13 +539,3 @@ POST /bookings
 ```
 
 ---
-
-## Static Files
-
-File yang diupload dapat diakses langsung via URL:
-
-```
-GET /assets/img/{folder}/{filename}
-```
-
-Contoh: `http://localhost:8080/assets/img/stores/abc123.jpg`
