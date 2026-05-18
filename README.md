@@ -53,9 +53,14 @@ JWT_EXPIRED_HOURS=24
 # SMTP (untuk kirim email password customer & notifikasi)
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
-SMTP_FROM=noreply@gamelounge.com
-SMTP_PASSWORD=your-smtp-app-password
+SMTP_FROM=noreply@gamelounge.com       # alamat pengirim (wajib)
+SMTP_PASSWORD=your-smtp-app-password   # Gmail: gunakan App Password, bukan password biasa
+SMTP_SENDER_NAME=Quantum Gaming Center # opsional — display name; fallback ke bagian sebelum @
 ```
+
+> **Gmail App Password**: aktifkan 2-Step Verification di akun Google, lalu buat App Password di
+> [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords).
+> Jangan gunakan password Gmail biasa — akan ditolak SMTP.
 
 ### 4. Buat database MySQL
 
@@ -178,7 +183,7 @@ game_lounge_be/
 │   │   ├── controller/           # CRUD voucher + generate-code + validate + customer-available
 │   │   ├── dto/                  # CreateVoucherRequest, ValidateVoucherRequest/Response
 │   │   ├── repository/           # FindAvailableVouchersForCustomer, RedeemVoucher
-│   │   └── service/              # VoucherWithStatus, sendVoucherNotification (async)
+│   │   └── service/              # VoucherWithStatus, sendVoucherNotification (async, DB template → HTML fallback)
 │   │
 │   ├── customer/
 │   │   ├── controller/           # CRUD customer + update-notes + resend-password
@@ -189,14 +194,20 @@ game_lounge_be/
 │   ├── booking/
 │   │   ├── controller/           # CRUD booking + dashboard + sessions-ending-soon + cancel/complete
 │   │   ├── dto/                  # CreateBookingRequest, BookingFilter, BookingResponse
-│   │   ├── repository/           # CheckOverlap, GenerateBookingCode, FindAvailableCredits
-│   │   └── service/              # 13-step CreateBooking (pricing→voucher→credits→email)
+│   │   ├── repository/           # CheckOverlap, GenerateBookingCode, FindAvailableCredits, GetRoomNameByID
+│   │   └── service/              # 13-step CreateBooking (pricing→voucher→credits→email, DB template → HTML fallback)
 │   │
 │   ├── sales/
 │   │   ├── controller/           # GET summary, trend, transactions
 │   │   ├── dto/                  # SalesFilter, SalesStats, TrendPoint, TransactionItem
 │   │   ├── repository/           # BookingRevenue, CreditsRevenue, SalesTrend, GetTransactions
 │   │   └── service/              # GetPeriodDates, changePercent, GetSalesSummary/Trend/Transactions
+│   │
+│   ├── notification_template/
+│   │   ├── controller/           # GET list, GET by key, PUT update, POST preview
+│   │   ├── dto/                  # UpdateTemplateRequest, PreviewRequest
+│   │   ├── repository/           # FindAll, FindByKey, UpdateByKey
+│   │   └── service/              # GetRendered (dipakai customer/voucher/booking service)
 │   │
 │   └── upload/
 │       └── controller/           # POST /upload — simpan file ke ./assets/img/{folder}/
@@ -209,7 +220,9 @@ game_lounge_be/
 │   ├── bcrypt.go                 # HashPassword, CheckPassword
 │   ├── response.go               # ResponseSuccess, ResponseError, ResponseSuccessPaginate, Meta
 │   ├── upload.go                 # SaveFileToAssets, InitAssetsDir, DeleteFile
-│   ├── email.go                  # smtpConfig, SendEmail, SendCustomerPasswordEmail
+│   ├── email.go                  # dispatch, SendEmail (plain text→HTML), SendHTMLEmail, SendCustomerPasswordEmail
+│   ├── email_templates.go        # BuildBookingEmailHTML, BuildVoucherEmailHTML (fallback HTML berdesain)
+│   ├── template_renderer.go      # RenderTemplate ({{var}} substitution), GetTemplateOrFallback
 │   └── password_generator.go     # GeneratePasswordFromName (substitusi karakter + suffix #Gl)
 │
 ├── assets/
@@ -400,6 +413,24 @@ Response:
 | GET | `/sales/trend` | Data grafik tren penjualan |
 | GET | `/sales/transactions` | Daftar transaksi (booking + play credits) dengan pagination |
 
+#### Notification Templates
+| Method | Endpoint | Keterangan |
+|--------|----------|------------|
+| GET | `/notification-templates` | List semua template notifikasi |
+| GET | `/notification-templates/:key` | Detail template berdasarkan key |
+| PUT | `/notification-templates/:key` | Update isi template (email & WhatsApp) |
+| POST | `/notification-templates/preview` | Preview template dengan data contoh |
+
+**notification_key** yang tersedia secara default:
+
+| Key | Deskripsi | Variabel |
+|-----|-----------|---------|
+| `customer_welcome` | Email sambutan + password akun baru | `nama_customer`, `email`, `password` |
+| `voucher_notification` | Notifikasi voucher ke seluruh member | `nama_customer`, `nama_voucher`, `kode_voucher`, `berlaku_sampai`, `deskripsi_voucher` |
+| `booking_confirmation` | Konfirmasi booking ke customer | `nama_customer`, `kode_booking`, `nama_ruangan`, `tanggal`, `jam_mulai`, `jam_selesai`, `durasi`, `total_harga` |
+
+> Template disimpan di tabel `notification_templates`. Admin bisa mengubah konten email & WhatsApp tanpa deploy ulang. Variabel dinamis menggunakan format `{{nama_variabel}}`.
+
 **Filter params (semua sales endpoint):**
 | Param | Nilai | Default |
 |-------|-------|---------|
@@ -411,6 +442,47 @@ Response:
 | `type` | `all` \| `booking` \| `play_credits` | `all` (khusus `/transactions`) |
 | `page` | integer | `1` (khusus `/transactions`) |
 | `per_page` | integer | `20` (khusus `/transactions`) |
+
+---
+
+## Sistem Email
+
+### Arsitektur pengiriman email
+
+```
+Trigger (create booking / create voucher / create customer)
+  │
+  ├─► ntService.GetRendered(key, vars)   ← ambil template dari DB
+  │     │
+  │     ├── Template ditemukan & aktif
+  │     │     └─► utils.SendEmail()      ← plain text + generic card wrapper
+  │     │
+  │     └── Template tidak ada / error
+  │           └─► utils.SendHTMLEmail()  ← HTML berdesain (BuildBookingEmailHTML / BuildVoucherEmailHTML)
+  │
+  └── [semua proses di goroutine — tidak memblokir HTTP response]
+```
+
+### Fungsi utilitas email
+
+| Fungsi | Kapan dipakai |
+|--------|--------------|
+| `SendEmail(to, name, subject, plainText)` | Template DB (plain text dengan `\n`, auto-wrap card) |
+| `SendHTMLEmail(to, name, subject, html)` | Template hardcode berdesain (booking & voucher fallback) |
+| `SendCustomerPasswordEmail(to, name, pwd)` | Fallback welcome email jika DB template tidak ada |
+| `BuildBookingEmailHTML(...)` | HTML email booking konfirmasi berdesain |
+| `BuildVoucherEmailHTML(...)` | HTML email notifikasi voucher berdesain |
+
+### Prioritas template
+
+1. **DB template** (`notification_templates` table) — bisa dikustomisasi admin via `PUT /notification-templates/:key`
+2. **Hardcode fallback** — HTML berdesain bawaan (booking & voucher), `SendCustomerPasswordEmail` (customer welcome)
+
+### Konfigurasi SMTP (Gmail)
+
+1. Aktifkan **2-Step Verification** di akun Google
+2. Buat **App Password** di [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords)
+3. Isi `SMTP_PASSWORD` dengan App Password tersebut (16 karakter tanpa spasi)
 
 ---
 

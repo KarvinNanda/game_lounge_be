@@ -270,3 +270,9 @@ func BatchUpdateStatus(storeID, date string) error {
 
 	return nil
 }
+
+
+// GetRoomNameByID mengambil nama room berdasarkan ID, dipakai oleh notification service.
+func GetRoomNameByID(roomID string, name *string) {
+	config.DB.Table("store_rooms").Select("name").Where("id = ?", roomID).Scan(name)
+}

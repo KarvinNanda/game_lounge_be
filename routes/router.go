@@ -6,15 +6,16 @@ import (
 	bookingCtrl "game_lounge_be/modules/booking/controller"
 	customerCtrl "game_lounge_be/modules/customer/controller"
 	facilityCtrl "game_lounge_be/modules/facility/controller"
-	voucherCtrl "game_lounge_be/modules/voucher/controller"
+	ntCtrl "game_lounge_be/modules/notification_template/controller"
 	playCreditsCtrl "game_lounge_be/modules/play_credits/controller"
 	pricingCtrl "game_lounge_be/modules/pricing/controller"
-	salesCtrl "game_lounge_be/modules/sales/controller"
 	roleCtrl "game_lounge_be/modules/role/controller"
 	roomTemplateCtrl "game_lounge_be/modules/room_template/controller"
+	salesCtrl "game_lounge_be/modules/sales/controller"
 	staffCtrl "game_lounge_be/modules/staff/controller"
 	storeCtrl "game_lounge_be/modules/store/controller"
 	uploadCtrl "game_lounge_be/modules/upload/controller"
+	voucherCtrl "game_lounge_be/modules/voucher/controller"
 
 	"github.com/gin-gonic/gin"
 )
@@ -137,6 +138,13 @@ func SetupRouter() *gin.Engine {
 		protected.GET("sales/summary", salesCtrl.GetSummary)
 		protected.GET("sales/trend", salesCtrl.GetTrend)
 		protected.GET("sales/transactions", salesCtrl.GetTransactions)
+
+		// ── Notification Templates ─────────────────────────────
+		// Note: rute statis (preview) didaftarkan SEBELUM /:key.
+		protected.GET("notification-templates", ntCtrl.GetAll)
+		protected.POST("notification-templates/preview", ntCtrl.Preview)
+		protected.GET("notification-templates/:key", ntCtrl.GetByKey)
+		protected.PUT("notification-templates/:key", ntCtrl.Update)
 
 		// ── Bookings ──────────────────────────────────────────
 		// Note: rute statis (dashboard, sessions-ending-soon, available-credits)

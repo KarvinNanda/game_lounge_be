@@ -11,6 +11,7 @@ import (
 	"game_lounge_be/modules/booking/dto"
 	"game_lounge_be/modules/booking/repository"
 	customerRepo "game_lounge_be/modules/customer/repository"
+	ntService "game_lounge_be/modules/notification_template/service"
 	creditsRepo "game_lounge_be/modules/play_credits/repository"
 	pricingDto "game_lounge_be/modules/pricing/dto"
 	pricingService "game_lounge_be/modules/pricing/service"
@@ -437,24 +438,17 @@ func GetAvailableCredits(customerID, storeID string, durationHours float64) ([]m
 
 // ── Notification ──────────────────────────────────────────────────────────────
 
-// sendBookingNotification mengirim kode booking ke email dan/atau WhatsApp customer.
+// sendBookingNotification mengirim konfirmasi booking.
+// Prioritas: template dari DB → fallback ke HTML hardcode yang sudah didesain.
 func sendBookingNotification(b *models.Booking) {
-	if b.CustomerEmail != nil && *b.CustomerEmail != "" {
-		subject := fmt.Sprintf("Booking Berhasil! Kode: %s", b.BookingCode)
-		body := buildBookingEmailBody(b)
-		if err := utils.SendEmail(*b.CustomerEmail, b.CustomerName, subject, body); err != nil {
-			log.Printf("[Booking] Gagal kirim email %s: %v", b.BookingCode, err)
+	if b.CustomerEmail == nil || *b.CustomerEmail == "" {
+		// Tidak ada email, cek WA saja
+		if b.CustomerWhatsapp != nil && *b.CustomerWhatsapp != "" {
+			log.Printf("[Booking][WhatsApp placeholder] Kirim kode %s ke %s", b.BookingCode, *b.CustomerWhatsapp)
 		}
+		return
 	}
 
-	if b.CustomerWhatsapp != nil && *b.CustomerWhatsapp != "" {
-		// WhatsApp placeholder — connect provider di phase berikutnya
-		log.Printf("[Booking][WhatsApp placeholder] Kirim kode %s ke %s", b.BookingCode, *b.CustomerWhatsapp)
-	}
-}
-
-// buildBookingEmailBody membuat HTML email konfirmasi booking.
-func buildBookingEmailBody(b *models.Booking) string {
 	startTime := b.StartTime
 	if len(startTime) >= 5 {
 		startTime = startTime[:5]
@@ -463,32 +457,53 @@ func buildBookingEmailBody(b *models.Booking) string {
 	if len(endTime) >= 5 {
 		endTime = endTime[:5]
 	}
-	return fmt.Sprintf(`<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;background:#f5f5f5;padding:20px">
-<div style="max-width:500px;margin:0 auto;background:white;border-radius:12px;padding:32px">
-  <div style="text-align:center;margin-bottom:20px">
-    <h2 style="color:#7c3aed;margin:0">GAME LOUNGE</h2>
-    <p style="color:#666;margin:4px 0">Playstation Rental</p>
-  </div>
-  <div style="text-align:center;margin:20px 0">
-    <div style="background:#f8f4ff;border:2px solid #e9d5ff;border-radius:12px;padding:20px;display:inline-block">
-      <p style="margin:0 0 6px;color:#666;font-size:13px">KODE BOOKING KAMU</p>
-      <p style="margin:0;font-size:28px;font-weight:bold;color:#7c3aed;letter-spacing:3px">%s</p>
-    </div>
-  </div>
-  <table style="width:100%%;font-size:13px;color:#555">
-    <tr><td style="padding:4px 0;color:#888">Nama</td><td style="font-weight:600">%s</td></tr>
-    <tr><td style="padding:4px 0;color:#888">Tanggal</td><td>%s</td></tr>
-    <tr><td style="padding:4px 0;color:#888">Waktu</td><td>%s - %s</td></tr>
-    <tr><td style="padding:4px 0;color:#888">Durasi</td><td>%.0f Jam</td></tr>
-    <tr><td style="padding:4px 0;color:#888">Total</td><td style="font-weight:600;color:#7c3aed">Rp %.0f</td></tr>
-  </table>
-  <p style="color:#888;font-size:12px;margin-top:20px">Tunjukkan kode ini kepada staff kami saat tiba di lokasi.</p>
-  <hr style="border:none;border-top:1px solid #eee;margin:20px 0">
-  <p style="color:#aaa;font-size:11px;text-align:center">© Game Lounge</p>
-</div></body></html>`,
-		b.BookingCode, b.CustomerName,
-		b.BookingDate.Format("02 January 2006"),
-		startTime, endTime,
-		b.DurationHours, b.TotalPrice,
-	)
+	roomName := getRoomName(b.RoomID)
+
+	subject := fmt.Sprintf("Booking Berhasil! Kode: %s", b.BookingCode)
+	var htmlContent string
+
+	// Coba ambil template dari DB
+	tmpl, err := ntService.GetRendered("booking_confirmation", map[string]string{
+		"nama_customer": b.CustomerName,
+		"kode_booking":  b.BookingCode,
+		"nama_ruangan":  roomName,
+		"tanggal":       b.BookingDate.Format("02 January 2006"),
+		"jam_mulai":     startTime,
+		"jam_selesai":   endTime,
+		"durasi":        fmt.Sprintf("%.0f", b.DurationHours),
+		"total_harga":   fmt.Sprintf("%.0f", b.TotalPrice),
+	})
+	if err == nil && tmpl.IsEmailActive {
+		// Template DB tersedia — kirim via SendEmail (plain text → HTML)
+		if emailErr := utils.SendEmail(*b.CustomerEmail, b.CustomerName, tmpl.EmailSubject, tmpl.EmailBody); emailErr != nil {
+			log.Printf("[Booking] Gagal kirim email %s: %v", b.BookingCode, emailErr)
+		}
+	} else {
+		// Fallback: gunakan HTML hardcode yang sudah didesain
+		htmlContent = utils.BuildBookingEmailHTML(
+			b.BookingCode, b.CustomerName, roomName,
+			b.BookingDate.Format("02 January 2006"),
+			startTime, endTime,
+			fmt.Sprintf("%.0f", b.DurationHours),
+			fmt.Sprintf("%.0f", b.TotalPrice),
+		)
+		if emailErr := utils.SendHTMLEmail(*b.CustomerEmail, b.CustomerName, subject, htmlContent); emailErr != nil {
+			log.Printf("[Booking] Gagal kirim email %s: %v", b.BookingCode, emailErr)
+		}
+	}
+
+	if b.CustomerWhatsapp != nil && *b.CustomerWhatsapp != "" {
+		waBody := ""
+		if err == nil {
+			waBody = tmpl.WhatsappBody
+		}
+		log.Printf("[Booking][WhatsApp placeholder] → %s: %s", *b.CustomerWhatsapp, waBody)
+	}
+}
+
+// getRoomName mengambil nama ruangan dari DB berdasarkan room_id.
+func getRoomName(roomID string) string {
+	var name string
+	repository.GetRoomNameByID(roomID, &name)
+	return name
 }

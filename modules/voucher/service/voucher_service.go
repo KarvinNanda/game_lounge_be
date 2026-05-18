@@ -11,6 +11,7 @@ import (
 	"game_lounge_be/models"
 	"game_lounge_be/modules/voucher/dto"
 	"game_lounge_be/modules/voucher/repository"
+	ntService "game_lounge_be/modules/notification_template/service"
 	"game_lounge_be/utils"
 
 	"github.com/google/uuid"
@@ -180,74 +181,52 @@ func CreateVoucher(req dto.CreateVoucherRequest, createdBy string) (*VoucherWith
 }
 
 // sendVoucherNotification mengirim notifikasi voucher ke semua member aktif secara async.
+// Prioritas: template dari DB → fallback ke HTML hardcode yang sudah didesain.
 func sendVoucherNotification(voucherID, name, code, channel string, endDate *time.Time, desc string) {
 	members, err := repository.FindAllMembers()
 	if err != nil || len(members) == 0 {
 		return
 	}
 
-	sent := 0
-	expiry := "Tidak ada tanggal berakhir"
+	expiry := "Tanpa batas"
 	if endDate != nil {
-		expiry = "Berlaku sampai " + endDate.Format("02 January 2006")
+		expiry = endDate.Format("02 Januari 2006")
 	}
 
 	for _, m := range members {
-		// Kirim Email
-		if channel == "email" || channel == "all" {
-			if m.Email == nil || *m.Email == "" {
-				continue
-			}
+		// ── Email ────────────────────────────────────────────────
+		if (channel == "email" || channel == "all") && m.Email != nil && *m.Email != "" {
 			subject := fmt.Sprintf("Voucher Spesial untuk Kamu: %s", code)
-			body := buildVoucherEmailBody(m.Name, name, code, expiry, desc)
-			if emailErr := utils.SendEmail(*m.Email, m.Name, subject, body); emailErr != nil {
-				log.Printf("[Voucher] Gagal kirim email ke %s: %v", *m.Email, emailErr)
-				continue
+
+			tmpl, tmplErr := ntService.GetRendered("voucher_notification", map[string]string{
+				"nama_customer":     m.Name,
+				"nama_voucher":      name,
+				"kode_voucher":      code,
+				"berlaku_sampai":    expiry,
+				"deskripsi_voucher": desc,
+			})
+
+			if tmplErr == nil && tmpl.IsEmailActive {
+				// Template DB tersedia
+				if emailErr := utils.SendEmail(*m.Email, m.Name, tmpl.EmailSubject, tmpl.EmailBody); emailErr != nil {
+					log.Printf("[Voucher] Gagal kirim email ke %s: %v", *m.Email, emailErr)
+				}
+			} else {
+				// Fallback: HTML hardcode yang sudah didesain
+				htmlContent := utils.BuildVoucherEmailHTML(m.Name, name, code, expiry, desc)
+				if emailErr := utils.SendHTMLEmail(*m.Email, m.Name, subject, htmlContent); emailErr != nil {
+					log.Printf("[Voucher] Gagal kirim email ke %s: %v", *m.Email, emailErr)
+				}
 			}
-			sent++
 		}
 
-		// WhatsApp: placeholder (belum ada provider)
+		// ── WhatsApp (placeholder) ────────────────────────────────
 		if channel == "whatsapp" || channel == "all" {
-			log.Printf("[Voucher][WhatsApp placeholder] Kirim voucher %s ke %s", code, m.Whatsapp)
-			if channel == "whatsapp" {
-				sent++
-			}
+			log.Printf("[Voucher][WhatsApp placeholder] → %s: voucher %s", m.Whatsapp, code)
 		}
 	}
 
-	if sent > 0 {
-		_ = repository.UpdateTotalSent(voucherID, sent)
-	}
-}
-
-// buildVoucherEmailBody membuat template HTML email voucher.
-func buildVoucherEmailBody(name, voucherName, code, expiry, desc string) string {
-	descBlock := ""
-	if desc != "" {
-		descBlock = fmt.Sprintf(`<p style="color:#555;font-size:13px;text-align:center">%s</p>`, desc)
-	}
-	return fmt.Sprintf(`
-<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;background:#f5f5f5;padding:20px">
-<div style="max-width:500px;margin:0 auto;background:white;border-radius:12px;padding:32px">
-  <div style="text-align:center;margin-bottom:20px">
-    <h2 style="color:#7c3aed;margin:0">QUANTUM GAMING CENNTER</h2>
-    <p style="color:#666;margin:4px 0">Playstation Rental</p>
-  </div>
-  <h3 style="color:#333">Halo, %s! 🎮</h3>
-  <p style="color:#555">Kamu mendapatkan voucher spesial dari kami:</p>
-  <div style="background:#f8f4ff;border:1px solid #e9d5ff;border-radius:10px;padding:20px;text-align:center;margin:16px 0">
-    <p style="margin:0 0 6px;color:#666;font-size:13px">%s</p>
-    <p style="margin:0;font-size:28px;font-weight:bold;color:#7c3aed;letter-spacing:4px">%s</p>
-    <p style="margin:8px 0 0;font-size:12px;color:#888">%s</p>
-  </div>
-  %s
-  <p style="color:#888;font-size:12px">Gunakan kode ini saat melakukan booking. Berlaku 1x penggunaan per akun.</p>
-  <hr style="border:none;border-top:1px solid #eee;margin:20px 0">
-  <p style="color:#aaa;font-size:11px;text-align:center">© Quantum Gaming Center</p>
-</div></body></html>`,
-		name, voucherName, code, expiry, descBlock,
-	)
+	_ = repository.UpdateTotalSent(voucherID, len(members))
 }
 
 func UpdateVoucher(id string, req dto.UpdateVoucherRequest, updatedBy string) (*VoucherWithStatus, error) {

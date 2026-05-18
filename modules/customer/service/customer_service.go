@@ -2,11 +2,13 @@ package service
 
 import (
 	"errors"
+	"log"
 	"time"
 
 	"game_lounge_be/models"
 	"game_lounge_be/modules/customer/dto"
 	"game_lounge_be/modules/customer/repository"
+	ntService "game_lounge_be/modules/notification_template/service"
 	"game_lounge_be/utils"
 
 	"github.com/google/uuid"
@@ -96,9 +98,32 @@ func CreateCustomer(req dto.CreateCustomerRequest, createdBy string) (*models.Cu
 		_ = repository.SyncFavoriteRoomTypes(customer.ID, req.FavoriteRoomTypes)
 	}
 
-	// Kirim email password (non-blocking — error tidak menggagalkan create)
+	// Kirim notifikasi via template dari DB (non-blocking)
 	if req.Email != "" && plainPassword != "" {
-		_ = utils.SendCustomerPasswordEmail(req.Email, req.Name, plainPassword)
+		name := req.Name
+		email := req.Email
+		pwd := plainPassword
+		wa := req.Whatsapp
+		go func() {
+			tmpl, err := ntService.GetRendered("customer_welcome", map[string]string{
+				"nama_customer": name,
+				"email":         email,
+				"password":      pwd,
+			})
+			if err != nil {
+				// Fallback ke fungsi email lama jika template belum ada di DB
+				_ = utils.SendCustomerPasswordEmail(email, name, pwd)
+				return
+			}
+			if tmpl.IsEmailActive {
+				if sendErr := utils.SendEmail(email, name, tmpl.EmailSubject, tmpl.EmailBody); sendErr != nil {
+					log.Printf("[Customer] Gagal kirim email ke %s: %v", email, sendErr)
+				}
+			}
+			if tmpl.IsWhatsappActive && wa != "" {
+				log.Printf("[Customer][WhatsApp placeholder] → %s: %s", wa, tmpl.WhatsappBody)
+			}
+		}()
 	}
 
 	return repository.FindCustomerByID(customer.ID)
@@ -229,8 +254,23 @@ func ResendPassword(id string) error {
 		return errors.New("gagal menyimpan password baru")
 	}
 
-	if err := utils.SendCustomerPasswordEmail(*customer.Email, customer.Name, plainPassword); err != nil {
-		return errors.New("password diperbarui, namun gagal mengirim email: " + err.Error())
+	email := *customer.Email
+	name := customer.Name
+	pwd := plainPassword
+	tmpl, tmplErr := ntService.GetRendered("customer_welcome", map[string]string{
+		"nama_customer": name,
+		"email":         email,
+		"password":      pwd,
+	})
+	if tmplErr != nil {
+		// Fallback ke fungsi email lama
+		if err := utils.SendCustomerPasswordEmail(email, name, pwd); err != nil {
+			return errors.New("password diperbarui, namun gagal mengirim email: " + err.Error())
+		}
+	} else if tmpl.IsEmailActive {
+		if err := utils.SendEmail(email, name, tmpl.EmailSubject, tmpl.EmailBody); err != nil {
+			return errors.New("password diperbarui, namun gagal mengirim email: " + err.Error())
+		}
 	}
 
 	return nil

@@ -195,7 +195,7 @@ func SalesTrend(dateFrom, dateTo, storeID, granularity string) []dto.TrendPoint 
 	if storeID != "" {
 		bq = bq.Where("store_id = ?", storeID)
 	}
-	bq.Group(bGroupExpr).Order(bGroupExpr).Scan(&bookingTrend)
+	bq.Group(fmt.Sprintf("%s, %s", bGroupExpr, bLabelExpr)).Order(bGroupExpr).Scan(&bookingTrend)
 
 	// Credits trend
 	var creditsTrend []trendRow
@@ -212,7 +212,7 @@ func SalesTrend(dateFrom, dateTo, storeID, granularity string) []dto.TrendPoint 
 				WHERE pcps.package_id = p.id AND pcps.store_id = ?
 			)`, storeID)
 	}
-	cq.Group(cGroupExpr).Order(cGroupExpr).Scan(&creditsTrend)
+	cq.Group(fmt.Sprintf("%s, %s", cGroupExpr, cLabelExpr)).Order(cGroupExpr).Scan(&creditsTrend)
 
 	// Merge ke map[groupByKey] → TrendPoint, lalu sort secara kronologis
 	type mergedEntry struct {
