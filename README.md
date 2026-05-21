@@ -97,7 +97,7 @@ game_lounge_be/
 │   └── database.go               # Koneksi GORM ke MySQL (config.DB)
 │
 ├── middleware/
-│   ├── auth.go                   # JWT auth middleware — set staff_id, staff_username ke context
+│   ├── auth.go                   # JWT auth middleware — set staff_id, staff_username, role_id, staff_role_id, is_system, permissions ke context
 │   └── cors.go                   # CORS middleware (allow all origins)
 │
 ├── models/                       # Definisi struct GORM (mapping ke tabel DB)
@@ -127,7 +127,8 @@ game_lounge_be/
 │   ├── customer.go               # Customer (member & walk-in)
 │   ├── customer_favorite_room_type.go  # Preferensi room type customer
 │   ├── booking.go                # Booking sesi bermain
-│   └── booking_sequence.go       # Counter auto-increment untuk kode booking
+│   ├── booking_sequence.go       # Counter auto-increment untuk kode booking
+│   └── global_holiday_schedule.go  # Hari libur nasional/global (menonaktifkan happy hour)
 │
 ├── modules/                      # Fitur-fitur API, masing-masing modul mandiri
 │   │
@@ -144,10 +145,10 @@ game_lounge_be/
 │   │   └── service/              # RoleWithPermissions
 │   │
 │   ├── staff/
-│   │   ├── controller/           # CRUD staff
+│   │   ├── controller/           # CRUD staff + reset-password (Super Admin only)
 │   │   ├── dto/                  # CreateStaffRequest, UpdateStaffRequest, StaffFilter
-│   │   ├── repository/           # FindAllStaffs (Preload Role, StaffStores.Store)
-│   │   └── service/              # Hash password, sync store assignments
+│   │   ├── repository/           # FindAllStaffs (Preload Role, StaffStores.Store), UpdatePassword
+│   │   └── service/              # Hash password, sync store assignments, ResetStaffPassword
 │   │
 │   ├── facility/
 │   │   ├── controller/           # CRUD kategori + CRUD fasilitas
@@ -162,16 +163,16 @@ game_lounge_be/
 │   │   └── service/              # CreateRoomTemplate, UpdateRoomTemplate
 │   │
 │   ├── store/
-│   │   ├── controller/           # CRUD store
+│   │   ├── controller/           # CRUD store + GetOperatingHours
 │   │   ├── dto/                  # CreateStoreRequest (operating_hours, holidays, rooms)
 │   │   ├── repository/           # FindAllStores, FindStoreByID (full preload chain)
-│   │   └── service/              # StoreListItem, UpsertOperatingHours/Holidays
+│   │   └── service/              # StoreListItem, UpsertOperatingHours/Holidays, GetEffectiveOperatingHours
 │   │
 │   ├── pricing/
 │   │   ├── controller/           # CRUD config, happy hour, packages, flash sales, calculator
 │   │   ├── dto/                  # PricingConfigRequest, CalculateRequest/Response
-│   │   ├── repository/           # GetByStore, UpsertHappyHourPrices, UpsertPackagePrices
-│   │   └── service/              # Calculate() — engine harga (normal/happy hour/paket/flash sale)
+│   │   ├── repository/           # GetByStore, UpsertHappyHourPrices, UpsertPackagePrices, IsStoreHoliday
+│   │   └── service/              # Calculate() — engine harga (flash sale overlap → HH/paket), isWeekdayForPricing
 │   │
 │   ├── play_credits/
 │   │   ├── controller/           # CRUD paket + assign/adjust/delete member credits
@@ -180,10 +181,10 @@ game_lounge_be/
 │   │   └── service/              # MemberCreditResponse + computed fields (used_hours, days_left, dll)
 │   │
 │   ├── voucher/
-│   │   ├── controller/           # CRUD voucher + generate-code + validate + customer-available
-│   │   ├── dto/                  # CreateVoucherRequest, ValidateVoucherRequest/Response
-│   │   ├── repository/           # FindAvailableVouchersForCustomer, RedeemVoucher
-│   │   └── service/              # VoucherWithStatus, sendVoucherNotification (async, DB template → HTML fallback)
+│   │   ├── controller/           # CRUD voucher + generate-code + validate + customer-available + recipient-count
+│   │   ├── dto/                  # CreateVoucherRequest (is_all_room_types, room_template_ids), ValidateVoucherRequest/Response
+│   │   ├── repository/           # FindAvailableVouchersForCustomer, RedeemVoucher, SyncRoomTemplates, GetMembersForVoucher
+│   │   └── service/              # VoucherWithStatus, sendVoucherNotification (targeted by room type, async)
 │   │
 │   ├── customer/
 │   │   ├── controller/           # CRUD customer + update-notes + resend-password
@@ -195,7 +196,7 @@ game_lounge_be/
 │   │   ├── controller/           # CRUD booking + dashboard + sessions-ending-soon + cancel/complete
 │   │   ├── dto/                  # CreateBookingRequest, BookingFilter, BookingResponse
 │   │   ├── repository/           # CheckOverlap, GenerateBookingCode, FindAvailableCredits, GetRoomNameByID
-│   │   └── service/              # 13-step CreateBooking (pricing→voucher→credits→email, DB template → HTML fallback)
+│   │   └── service/              # 13-step CreateBooking; DashboardData includes open/close time + holiday info
 │   │
 │   ├── sales/
 │   │   ├── controller/           # GET summary, trend, transactions
@@ -203,11 +204,17 @@ game_lounge_be/
 │   │   ├── repository/           # BookingRevenue, CreditsRevenue, SalesTrend, GetTransactions
 │   │   └── service/              # GetPeriodDates, changePercent, GetSalesSummary/Trend/Transactions
 │   │
+│   ├── global_holiday/
+│   │   ├── controller/           # CRUD global holiday
+│   │   ├── dto/                  # CreateGlobalHolidayRequest, UpdateGlobalHolidayRequest
+│   │   ├── repository/           # FindAll, FindByID, FindByDate, Create, Update, SoftDelete
+│   │   └── service/              # GetAll, Create, Update, Delete
+│   │
 │   ├── notification_template/
 │   │   ├── controller/           # GET list, GET by key, PUT update, POST preview
 │   │   ├── dto/                  # UpdateTemplateRequest, PreviewRequest
 │   │   ├── repository/           # FindAll, FindByKey, UpdateByKey
-│   │   └── service/              # GetRendered (dipakai customer/voucher/booking service)
+│   │   └── service/              # GetRendered (dipakai customer/voucher/booking/play_credits service)
 │   │
 │   └── upload/
 │       └── controller/           # POST /upload — simpan file ke ./assets/img/{folder}/
@@ -289,6 +296,7 @@ Response:
 | GET | `/staffs/:id` | Detail staff |
 | PUT | `/staffs/:id` | Update staff |
 | DELETE | `/staffs/:id` | Hapus staff (soft delete) |
+| POST | `/staffs/:id/reset-password` | Reset password staff & kirim email (Super Admin only) |
 
 #### Facility Categories
 | Method | Endpoint | Keterangan |
@@ -321,9 +329,24 @@ Response:
 |--------|----------|------------|
 | GET | `/stores` | List store (+ operating hours, holidays, room count) |
 | POST | `/stores` | Buat store baru |
+| GET | `/stores/operating-hours` | Jam operasional efektif store pada tanggal tertentu |
 | GET | `/stores/:id` | Detail store (+ rooms → template → facilities → category) |
 | PUT | `/stores/:id` | Update store |
 | DELETE | `/stores/:id` | Hapus store (soft delete) |
+
+**`GET /stores/operating-hours`** — query params: `store_id` *(required)*, `date` *(required, YYYY-MM-DD)*
+
+Response:
+```json
+{
+  "open_time": "10:00:00",
+  "close_time": "22:00:00",
+  "is_holiday": true,
+  "holiday_name": "Hari Kemerdekaan Indonesia",
+  "holiday_type": "global"
+}
+```
+Priority: **Global Holiday** → **Store Holiday** → **Regular Hours** (weekday/weekend)
 
 #### Pricing
 | Method | Endpoint | Keterangan |
@@ -373,6 +396,7 @@ Response:
 | GET | `/vouchers` | List voucher (filter: search, type, status) |
 | GET | `/vouchers/generate-code` | Generate kode voucher unik |
 | GET | `/vouchers/customer-available` | Voucher tersedia untuk customer tertentu |
+| GET | `/vouchers/recipient-count` | Preview jumlah member penerima berdasarkan room type |
 | POST | `/vouchers/validate` | Validasi & cek kelayakan voucher |
 | POST | `/vouchers` | Buat voucher baru |
 | GET | `/vouchers/:id` | Detail voucher |
@@ -380,6 +404,16 @@ Response:
 | DELETE | `/vouchers/:id` | Hapus voucher (soft delete) |
 
 **customer-available** — query params: `customer_id` *(required)*, `store_id` *(required)*, `type` (default: `booking`)
+
+**recipient-count** — query params: `is_all_room_types` (`true`/`false`, default `true`), `room_template_ids[]` *(repeated uint)*
+
+**Room type targeting pada voucher:**
+| Field | Tipe | Keterangan |
+|-------|------|------------|
+| `is_all_room_types` | bool | `true` = berlaku semua room type; `false` = per room type |
+| `room_template_ids` | `[]uint` | Daftar room template ID (wajib jika `is_all_room_types=false`) |
+
+> Jika `is_all_room_types = false`, hanya member yang memiliki salah satu room type tersebut sebagai **favorit** yang akan menerima notifikasi. Validasi voucher saat booking juga akan cek room type yang dipilih.
 
 #### Customers
 | Method | Endpoint | Keterangan |
@@ -396,8 +430,8 @@ Response:
 | Method | Endpoint | Keterangan |
 |--------|----------|------------|
 | GET | `/bookings` | List booking (filter: store_id, date_from, date_to, status, search) |
-| GET | `/bookings/dashboard` | Data dashboard booking hari ini per store |
-| GET | `/bookings/sessions-ending-soon` | Sesi yang akan berakhir dalam 30 menit |
+| GET | `/bookings/dashboard` | Data dashboard booking per store (rooms + bookings + jam operasional efektif + info holiday) |
+| GET | `/bookings/sessions-ending-soon` | Sesi yang akan berakhir dalam 5 menit ke depan |
 | GET | `/bookings/available-credits` | Play credits yang tersedia untuk customer tertentu |
 | POST | `/bookings` | Buat booking baru |
 | GET | `/bookings/:id` | Detail booking |
@@ -412,6 +446,26 @@ Response:
 | GET | `/sales/summary` | Dashboard utama — revenue, transaksi, breakdown per tipe/cabang/room |
 | GET | `/sales/trend` | Data grafik tren penjualan |
 | GET | `/sales/transactions` | Daftar transaksi (booking + play credits) dengan pagination |
+
+#### Global Holidays
+| Method | Endpoint | Keterangan |
+|--------|----------|------------|
+| GET | `/global-holidays` | List hari libur nasional (filter: year, search) |
+| POST | `/global-holidays` | Tambah hari libur nasional |
+| PUT | `/global-holidays/:id` | Update hari libur |
+| DELETE | `/global-holidays/:id` | Hapus hari libur (soft delete) |
+
+> Global holiday **menonaktifkan happy hour** di semua store pada tanggal tersebut — diprioritaskan sebelum store holiday dan pengecekan hari kerja.
+
+**Body `POST /global-holidays`:**
+```json
+{
+  "date": "2025-08-17",
+  "name": "Hari Kemerdekaan Indonesia",
+  "open_time": "10:00",
+  "close_time": "22:00"
+}
+```
 
 #### Notification Templates
 | Method | Endpoint | Keterangan |
@@ -428,6 +482,7 @@ Response:
 | `customer_welcome` | Email sambutan + password akun baru | `nama_customer`, `email`, `password` |
 | `voucher_notification` | Notifikasi voucher ke seluruh member | `nama_customer`, `nama_voucher`, `kode_voucher`, `berlaku_sampai`, `deskripsi_voucher` |
 | `booking_confirmation` | Konfirmasi booking ke customer | `nama_customer`, `kode_booking`, `nama_ruangan`, `tanggal`, `jam_mulai`, `jam_selesai`, `durasi`, `total_harga` |
+| `play_credits_assigned` | Notifikasi assign play credits ke customer | `nama_customer`, `nama_paket`, `total_jam`, `sisa_jam`, `tanggal_kadaluwarsa` |
 
 > Template disimpan di tabel `notification_templates`. Admin bisa mengubah konten email & WhatsApp tanpa deploy ulang. Variabel dinamis menggunakan format `{{nama_variabel}}`.
 
@@ -517,11 +572,15 @@ Setiap record memiliki kolom:
 
 Urutan penerapan harga saat `POST /pricing/calculate` atau membuat booking:
 
-1. **Base price** — tarif normal per jam × durasi
-2. **Happy hour** — cek apakah jam mulai masuk jadwal happy hour; jika ya, gunakan harga happy hour
-3. **Package price** — cek apakah ada harga paket untuk durasi yang diminta; jika ya, override
-4. **Flash sale** — cek flash sale aktif; terapkan diskon persen di atas harga yang sudah dihitung
-5. **Voucher** — diskon voucher diterapkan di atas `final_price` dari langkah 4 (hanya saat booking)
+1. **Flash sale** — hitung overlap menit antara waktu booking dan window flash sale aktif; bagian yang overlap menggunakan `price_per_hour` flash sale (bukan diskon, langsung harga per jam)
+2. **Sisa durasi** (non-flash) — cek `isWeekdayForPricing()`:
+   - Global holiday → harga **normal** (happy hour nonaktif)
+   - Store holiday → harga **normal** (happy hour nonaktif)
+   - Senin–Kamis → cek jadwal **happy hour** (jika masuk → pakai harga HH, kalau tidak → cek package price → normal)
+   - Jumat–Minggu → cek **package price** → normal
+3. **Voucher** — diskon voucher diterapkan di atas `final_price` (hanya saat booking)
+
+**Flash sale** menggunakan field `price_per_hour` (tarif per jam langsung, bukan diskon persen). Contoh: flash sale `price_per_hour = 50.000` aktif 19:00–21:00, booking 19:00–23:00 → 2 jam × 50.000 + 2 jam harga normal/HH.
 
 ---
 

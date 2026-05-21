@@ -97,3 +97,24 @@ func Delete(c *gin.Context) {
 
 	utils.ResponseSuccess(c, http.StatusOK, "Staff berhasil dihapus", nil)
 }
+
+// ResetPassword mereset password staff dan mengirimkan password baru ke email staff.
+// Hanya bisa dilakukan oleh Super Admin (is_system = true atau role_id = 1).
+func ResetPassword(c *gin.Context) {
+	staffID := c.Param("id")
+
+	// Validasi: hanya Super Admin atau is_system yang boleh reset
+	isSystem := c.GetBool("is_system")
+	roleID := c.GetUint("role_id")
+	if !isSystem && roleID != 1 {
+		utils.ResponseError(c, http.StatusForbidden, "Hanya Super Admin yang bisa reset password staff")
+		return
+	}
+
+	result, err := service.ResetStaffPassword(staffID)
+	if err != nil {
+		utils.ResponseError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	utils.ResponseSuccess(c, http.StatusOK, "Password berhasil direset dan dikirim ke email staff", result)
+}

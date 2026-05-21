@@ -21,6 +21,7 @@ type Voucher struct {
 	TotalSent     uint       `gorm:"default:0" json:"total_sent"`
 	UsedCount     uint       `gorm:"default:0" json:"used_count"`
 	IsAllStores   bool       `gorm:"default:true" json:"is_all_stores"`
+	IsAllRoomTypes bool      `gorm:"default:true" json:"is_all_room_types"`
 	IsActive      bool       `gorm:"default:true" json:"is_active"`
 	CreatedBy     *string    `gorm:"size:255" json:"created_by"`
 	UpdatedBy     *string    `gorm:"size:255" json:"updated_by"`
@@ -29,6 +30,7 @@ type Voucher struct {
 	UpdatedAt     time.Time  `json:"updated_at"`
 	DeletedAt     *time.Time `gorm:"index" json:"deleted_at"`
 
-	Stores []VoucherStore `gorm:"foreignKey:VoucherID" json:"stores,omitempty"`
-	Usages []VoucherUsage `gorm:"foreignKey:VoucherID" json:"usages,omitempty"`
+	Stores        []VoucherStore        `gorm:"foreignKey:VoucherID" json:"stores,omitempty"`
+	Usages        []VoucherUsage        `gorm:"foreignKey:VoucherID" json:"usages,omitempty"`
+	RoomTemplates []VoucherRoomTemplate `gorm:"foreignKey:VoucherID" json:"room_templates,omitempty"`
 }

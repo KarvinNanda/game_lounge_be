@@ -2,6 +2,7 @@ package controller
 
 import (
 	"net/http"
+	"strconv"
 
 	"game_lounge_be/modules/voucher/dto"
 	"game_lounge_be/modules/voucher/service"
@@ -132,6 +133,26 @@ func Delete(c *gin.Context) {
 		return
 	}
 	utils.ResponseSuccess(c, http.StatusOK, "Voucher berhasil dihapus", nil)
+}
+
+// GetRecipientCount preview berapa member yang akan menerima voucher.
+// Query params: is_all_room_types (bool, default true), room_template_ids[] (repeated uint)
+func GetRecipientCount(c *gin.Context) {
+	isAll := c.Query("is_all_room_types") != "false"
+
+	var rtIDs []uint
+	for _, id := range c.QueryArray("room_template_ids[]") {
+		if n, err := strconv.Atoi(id); err == nil {
+			rtIDs = append(rtIDs, uint(n))
+		}
+	}
+
+	count, err := service.GetRecipientCount(isAll, rtIDs)
+	if err != nil {
+		utils.ResponseError(c, http.StatusInternalServerError, "Gagal menghitung penerima")
+		return
+	}
+	utils.ResponseSuccess(c, http.StatusOK, "OK", gin.H{"count": count})
 }
 
 // Validate dipakai modul Booking untuk cek voucher sebelum digunakan.

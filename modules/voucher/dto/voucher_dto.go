@@ -1,34 +1,38 @@
 package dto
 
 type CreateVoucherRequest struct {
-	Name          string   `json:"name" binding:"required,min=2,max=150"`
-	Code          string   `json:"code" binding:"required,min=2,max=50"`
-	Description   string   `json:"description"`
-	Type          string   `json:"type" binding:"required,oneof=booking play_credits both"`
-	DiscountType  string   `json:"discount_type" binding:"required,oneof=percentage nominal"`
-	DiscountValue float64  `json:"discount_value" binding:"required,min=0"`
-	MaxDiscount   float64  `json:"max_discount"`
-	MinPurchase   float64  `json:"min_purchase"`
-	StartDate     string   `json:"start_date" binding:"required"`
-	EndDate       string   `json:"end_date"`
-	SendChannel   string   `json:"send_channel"`
-	IsAllStores   bool     `json:"is_all_stores"`
-	StoreIDs      []string `json:"store_ids"`
+	Name           string   `json:"name" binding:"required,min=2,max=150"`
+	Code           string   `json:"code" binding:"required,min=2,max=50"`
+	Description    string   `json:"description"`
+	Type           string   `json:"type" binding:"required,oneof=booking play_credits both"`
+	DiscountType   string   `json:"discount_type" binding:"required,oneof=percentage nominal"`
+	DiscountValue  float64  `json:"discount_value" binding:"required,min=0"`
+	MaxDiscount    float64  `json:"max_discount"`
+	MinPurchase    float64  `json:"min_purchase"`
+	StartDate      string   `json:"start_date" binding:"required"`
+	EndDate        string   `json:"end_date"`
+	SendChannel    string   `json:"send_channel"`
+	IsAllStores    bool     `json:"is_all_stores"`
+	StoreIDs       []string `json:"store_ids"`
+	IsAllRoomTypes bool     `json:"is_all_room_types"`   // false = per room type
+	RoomTemplateIDs []uint  `json:"room_template_ids"`   // wajib jika is_all_room_types=false
 }
 
 type UpdateVoucherRequest struct {
-	Name          string   `json:"name" binding:"required,min=2,max=150"`
-	Description   string   `json:"description"`
-	Type          string   `json:"type" binding:"required,oneof=booking play_credits both"`
-	DiscountType  string   `json:"discount_type" binding:"required,oneof=percentage nominal"`
-	DiscountValue float64  `json:"discount_value" binding:"required,min=0"`
-	MaxDiscount   float64  `json:"max_discount"`
-	MinPurchase   float64  `json:"min_purchase"`
-	StartDate     string   `json:"start_date" binding:"required"`
-	EndDate       string   `json:"end_date"`
-	IsAllStores   bool     `json:"is_all_stores"`
-	StoreIDs      []string `json:"store_ids"`
-	IsActive      *bool    `json:"is_active"`
+	Name            string   `json:"name" binding:"required,min=2,max=150"`
+	Description     string   `json:"description"`
+	Type            string   `json:"type" binding:"required,oneof=booking play_credits both"`
+	DiscountType    string   `json:"discount_type" binding:"required,oneof=percentage nominal"`
+	DiscountValue   float64  `json:"discount_value" binding:"required,min=0"`
+	MaxDiscount     float64  `json:"max_discount"`
+	MinPurchase     float64  `json:"min_purchase"`
+	StartDate       string   `json:"start_date" binding:"required"`
+	EndDate         string   `json:"end_date"`
+	IsAllStores     bool     `json:"is_all_stores"`
+	StoreIDs        []string `json:"store_ids"`
+	IsActive        *bool    `json:"is_active"`
+	IsAllRoomTypes  bool     `json:"is_all_room_types"`
+	RoomTemplateIDs []uint   `json:"room_template_ids"`
 }
 
 type VoucherFilter struct {
@@ -42,11 +46,12 @@ type VoucherFilter struct {
 
 // ValidateVoucherRequest dipakai modul Booking nanti untuk cek voucher.
 type ValidateVoucherRequest struct {
-	Code       string  `json:"code" binding:"required"`
-	CustomerID string  `json:"customer_id" binding:"required"`
-	StoreID    string  `json:"store_id" binding:"required"`
-	Amount     float64 `json:"amount" binding:"required,min=0"`
-	UseType    string  `json:"use_type" binding:"required,oneof=booking play_credits"`
+	Code           string  `json:"code" binding:"required"`
+	CustomerID     string  `json:"customer_id" binding:"required"`
+	StoreID        string  `json:"store_id" binding:"required"`
+	Amount         float64 `json:"amount" binding:"required,min=0"`
+	UseType        string  `json:"use_type" binding:"required,oneof=booking play_credits"`
+	RoomTemplateID uint    `json:"room_template_id"` // opsional — dipakai untuk cek room type restriction
 }
 
 type ValidateVoucherResponse struct {

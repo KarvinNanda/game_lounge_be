@@ -195,8 +195,11 @@ func parseTimeToMinutes(t string) int {
 
 // ── Sessions Ending Soon ──────────────────────────────────────────────────────
 
-// FindSessionsEndingSoon mengambil sesi yang akan berakhir dalam X menit ke depan.
+// FindSessionsEndingSoon mengambil sesi yang akan berakhir dalam X menit ke depan (default 5).
 func FindSessionsEndingSoon(storeID string, withinMinutes int) ([]models.Booking, error) {
+	if withinMinutes <= 0 {
+		withinMinutes = 5
+	}
 	now := time.Now().In(jakartaLoc())
 	today := now.Format("2006-01-02")
 	nowTime := now.Format("15:04:05")

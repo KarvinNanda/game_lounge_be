@@ -12,6 +12,72 @@ import (
 	"github.com/google/uuid"
 )
 
+// ── Operating Hours ───────────────────────────────────────────────────────────
+
+// OperatingHoursResult adalah hasil cek jam operasional efektif untuk suatu tanggal.
+type OperatingHoursResult struct {
+	OpenTime    string `json:"open_time"`
+	CloseTime   string `json:"close_time"`
+	IsHoliday   bool   `json:"is_holiday"`
+	HolidayName string `json:"holiday_name"` // nama hari libur jika holiday
+	HolidayType string `json:"holiday_type"` // "global" | "store" | ""
+}
+
+// GetEffectiveOperatingHours mengembalikan jam operasional efektif store pada tanggal tertentu.
+// Priority: Global Holiday → Store Holiday → Regular Operating Hours (weekday/weekend)
+// Jika global/store holiday → is_holiday=true, happy hour tidak berlaku.
+func GetEffectiveOperatingHours(storeID string, date time.Time) (*OperatingHoursResult, error) {
+	dateStr := date.Format("2006-01-02")
+
+	// 1. Cek global holiday (berlaku untuk semua store)
+	var globalHoliday models.GlobalHolidaySchedule
+	if err := config.DB.Where("DATE(date) = ? AND deleted_at IS NULL", dateStr).
+		First(&globalHoliday).Error; err == nil {
+		return &OperatingHoursResult{
+			OpenTime:    globalHoliday.OpenTime,
+			CloseTime:   globalHoliday.CloseTime,
+			IsHoliday:   true,
+			HolidayName: globalHoliday.Name,
+			HolidayType: "global",
+		}, nil
+	}
+
+	// 2. Cek store-specific holiday
+	var storeHoliday models.StoreHolidaySchedule
+	if err := config.DB.Where("store_id = ? AND DATE(date) = ? AND deleted_at IS NULL",
+		storeID, dateStr).First(&storeHoliday).Error; err == nil {
+		return &OperatingHoursResult{
+			OpenTime:    storeHoliday.OpenTime,
+			CloseTime:   storeHoliday.CloseTime,
+			IsHoliday:   true,
+			HolidayName: "Tanggal Merah Cabang",
+			HolidayType: "store",
+		}, nil
+	}
+
+	// 3. Jam operasional reguler (weekday/weekend)
+	dayType := "weekend"
+	wd := date.Weekday()
+	if wd >= time.Monday && wd <= time.Friday {
+		dayType = "weekday"
+	}
+
+	var opHour models.StoreOperatingHour
+	if err := config.DB.Where(
+		"store_id = ? AND day_type = ? AND is_active = true AND deleted_at IS NULL",
+		storeID, dayType).First(&opHour).Error; err != nil {
+		return nil, errors.New("jam operasional tidak ditemukan untuk store ini")
+	}
+
+	return &OperatingHoursResult{
+		OpenTime:    opHour.OpenTime,
+		CloseTime:   opHour.CloseTime,
+		IsHoliday:   false,
+		HolidayName: "",
+		HolidayType: "",
+	}, nil
+}
+
 // StoreListItem wraps a Store with a precomputed room count for list responses.
 type StoreListItem struct {
 	models.Store

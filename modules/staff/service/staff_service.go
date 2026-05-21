@@ -102,3 +102,50 @@ func DeleteStaff(id string, deletedBy string) error {
 	staff.DeletedAt = &now
 	return repository.SoftDeleteStaff(staff, deletedBy)
 }
+
+// ── Reset Password ────────────────────────────────────────────────────────────
+
+// ResetPasswordResult adalah response setelah reset password staff.
+type ResetPasswordResult struct {
+	StaffID  string `json:"staff_id"`
+	Username string `json:"username"`
+	Email    string `json:"email"`
+	Message  string `json:"message"`
+}
+
+// ResetStaffPassword generate password baru dari username, simpan ke DB, kirim ke email staff.
+func ResetStaffPassword(staffID string) (*ResetPasswordResult, error) {
+	staff, err := repository.FindStaffByID(staffID)
+	if err != nil {
+		return nil, errors.New("staff tidak ditemukan")
+	}
+
+	newPassword := utils.GeneratePasswordFromName(staff.Username)
+
+	hashedPassword, err := utils.HashPassword(newPassword)
+	if err != nil {
+		return nil, errors.New("gagal memproses password baru")
+	}
+
+	if err := repository.UpdatePassword(staff.ID, hashedPassword); err != nil {
+		return nil, errors.New("gagal menyimpan password baru")
+	}
+
+	// Kirim email ke staff (async)
+	username := staff.Username
+	email := staff.Email
+	go func() {
+		subject := "Password Akun Quantum Anda Telah Direset"
+		body := "Halo " + username + "!\n\nPassword akun Quantum Playstation Rental kamu telah direset oleh Super Admin.\n\nBerikut password baru kamu:\nUsername : " + username + "\nPassword : " + newPassword + "\n\nSegera login dan ganti password kamu setelah masuk.\n\nSalam,\nTim Quantum Gaming Center"
+		if err := utils.SendEmail(email, username, subject, body); err != nil {
+			_ = err // log sudah ada di SendEmail
+		}
+	}()
+
+	return &ResetPasswordResult{
+		StaffID:  staff.ID,
+		Username: staff.Username,
+		Email:    staff.Email,
+		Message:  "Password baru telah dikirim ke " + staff.Email,
+	}, nil
+}

@@ -33,7 +33,12 @@ func enrichVoucher(v models.Voucher) VoucherWithStatus {
 	} else if v.EndDate != nil && v.EndDate.Before(now) {
 		status = "expired"
 	}
-	total := repository.CountAllMembers()
+	// Hitung penerima aktual berdasarkan room type targeting
+	var rtIDs []uint
+	for _, rt := range v.RoomTemplates {
+		rtIDs = append(rtIDs, rt.RoomTemplateID)
+	}
+	total, _ := repository.CountMembersForVoucher(v.IsAllRoomTypes, rtIDs)
 	return VoucherWithStatus{Voucher: v, Status: status, TotalMembers: total}
 }
 
@@ -144,21 +149,22 @@ func CreateVoucher(req dto.CreateVoucherRequest, createdBy string) (*VoucherWith
 
 	code := strings.ToUpper(req.Code)
 	voucher := &models.Voucher{
-		ID:            uuid.NewString(),
-		Name:          req.Name,
-		Code:          code,
-		Description:   desc,
-		Type:          req.Type,
-		DiscountType:  req.DiscountType,
-		DiscountValue: req.DiscountValue,
-		MaxDiscount:   maxDiscount,
-		MinPurchase:   minPurchase,
-		StartDate:     startDate,
-		EndDate:       endDate,
-		SendChannel:   channel,
-		IsAllStores:   req.IsAllStores,
-		IsActive:      true,
-		CreatedBy:     &createdBy,
+		ID:             uuid.NewString(),
+		Name:           req.Name,
+		Code:           code,
+		Description:    desc,
+		Type:           req.Type,
+		DiscountType:   req.DiscountType,
+		DiscountValue:  req.DiscountValue,
+		MaxDiscount:    maxDiscount,
+		MinPurchase:    minPurchase,
+		StartDate:      startDate,
+		EndDate:        endDate,
+		SendChannel:    channel,
+		IsAllStores:    req.IsAllStores,
+		IsAllRoomTypes: req.IsAllRoomTypes,
+		IsActive:       true,
+		CreatedBy:      &createdBy,
 	}
 
 	if err := repository.CreateVoucher(voucher); err != nil {
@@ -169,51 +175,72 @@ func CreateVoucher(req dto.CreateVoucherRequest, createdBy string) (*VoucherWith
 		_ = repository.SyncVoucherStores(voucher.ID, req.StoreIDs)
 	}
 
+	// Sync room templates jika per room type
+	if !req.IsAllRoomTypes && len(req.RoomTemplateIDs) > 0 {
+		if err := repository.SyncRoomTemplates(voucher.ID, req.RoomTemplateIDs); err != nil {
+			return nil, errors.New("gagal menyimpan room template voucher")
+		}
+	}
+
 	// Kirim notifikasi ke member secara async (tidak memblokir response)
 	if req.SendChannel != "" {
-		go sendVoucherNotification(
-			voucher.ID, voucher.Name, voucher.Code,
-			req.SendChannel, endDate, req.Description,
-		)
+		voucherID := voucher.ID
+		sendChannel := req.SendChannel
+		go func() {
+			// Reload dari DB agar RoomTemplates ter-preload
+			fullVoucher, err := repository.FindVoucherByID(voucherID)
+			if err != nil {
+				return
+			}
+			sendVoucherNotification(fullVoucher, sendChannel)
+		}()
 	}
 
 	return GetVoucherByID(voucher.ID)
 }
 
-// sendVoucherNotification mengirim notifikasi voucher ke semua member aktif secara async.
+// sendVoucherNotification mengirim notifikasi voucher ke member yang sesuai target room type.
 // Prioritas: template dari DB → fallback ke HTML hardcode yang sudah didesain.
-func sendVoucherNotification(voucherID, name, code, channel string, endDate *time.Time, desc string) {
-	members, err := repository.FindAllMembers()
+func sendVoucherNotification(v *models.Voucher, channel string) {
+	// Kumpulkan room template IDs dari junction table
+	var rtIDs []uint
+	for _, rt := range v.RoomTemplates {
+		rtIDs = append(rtIDs, rt.RoomTemplateID)
+	}
+
+	// Ambil member yang sesuai target
+	members, err := repository.GetMembersForVoucher(v.ID, v.IsAllRoomTypes, rtIDs)
 	if err != nil || len(members) == 0 {
 		return
 	}
 
-	expiry := "Tanpa batas"
-	if endDate != nil {
-		expiry = endDate.Format("02 Januari 2006")
+	endDate := "Tanpa batas"
+	if v.EndDate != nil {
+		endDate = v.EndDate.Format("02 Januari 2006")
+	}
+	desc := ""
+	if v.Description != nil {
+		desc = *v.Description
 	}
 
 	for _, m := range members {
+		tmpl, tmplErr := ntService.GetRendered("voucher_notification", map[string]string{
+			"nama_customer":     m.Name,
+			"nama_voucher":      v.Name,
+			"kode_voucher":      v.Code,
+			"berlaku_sampai":    endDate,
+			"deskripsi_voucher": desc,
+		})
+
 		// ── Email ────────────────────────────────────────────────
-		if (channel == "email" || channel == "all") && m.Email != nil && *m.Email != "" {
-			subject := fmt.Sprintf("Voucher Spesial untuk Kamu: %s", code)
-
-			tmpl, tmplErr := ntService.GetRendered("voucher_notification", map[string]string{
-				"nama_customer":     m.Name,
-				"nama_voucher":      name,
-				"kode_voucher":      code,
-				"berlaku_sampai":    expiry,
-				"deskripsi_voucher": desc,
-			})
-
+		if m.Email != nil && *m.Email != "" && (channel == "email" || channel == "all") {
 			if tmplErr == nil && tmpl.IsEmailActive {
-				// Template DB tersedia
 				if emailErr := utils.SendEmail(*m.Email, m.Name, tmpl.EmailSubject, tmpl.EmailBody); emailErr != nil {
 					log.Printf("[Voucher] Gagal kirim email ke %s: %v", *m.Email, emailErr)
 				}
 			} else {
-				// Fallback: HTML hardcode yang sudah didesain
-				htmlContent := utils.BuildVoucherEmailHTML(m.Name, name, code, expiry, desc)
+				subject := fmt.Sprintf("Voucher Spesial untuk Kamu: %s", v.Code)
+				htmlContent := utils.BuildVoucherEmailHTML(m.Name, v.Name, v.Code, endDate, desc)
 				if emailErr := utils.SendHTMLEmail(*m.Email, m.Name, subject, htmlContent); emailErr != nil {
 					log.Printf("[Voucher] Gagal kirim email ke %s: %v", *m.Email, emailErr)
 				}
@@ -222,11 +249,15 @@ func sendVoucherNotification(voucherID, name, code, channel string, endDate *tim
 
 		// ── WhatsApp (placeholder) ────────────────────────────────
 		if channel == "whatsapp" || channel == "all" {
-			log.Printf("[Voucher][WhatsApp placeholder] → %s: voucher %s", m.Whatsapp, code)
+			waBody := ""
+			if tmplErr == nil && tmpl.IsWhatsappActive {
+				waBody = tmpl.WhatsappBody
+			}
+			log.Printf("[Voucher][WhatsApp placeholder] → %s: %s", m.Whatsapp, waBody)
 		}
 	}
 
-	_ = repository.UpdateTotalSent(voucherID, len(members))
+	_ = repository.UpdateTotalSent(v.ID, len(members))
 }
 
 func UpdateVoucher(id string, req dto.UpdateVoucherRequest, updatedBy string) (*VoucherWithStatus, error) {
@@ -272,6 +303,7 @@ func UpdateVoucher(id string, req dto.UpdateVoucherRequest, updatedBy string) (*
 	voucher.StartDate = startDate
 	voucher.EndDate = endDate
 	voucher.IsAllStores = req.IsAllStores
+	voucher.IsAllRoomTypes = req.IsAllRoomTypes
 	voucher.IsActive = isActive
 	voucher.UpdatedBy = &updatedBy
 
@@ -283,6 +315,15 @@ func UpdateVoucher(id string, req dto.UpdateVoucherRequest, updatedBy string) (*
 		_ = repository.SyncVoucherStores(voucher.ID, req.StoreIDs)
 	} else {
 		_ = repository.SyncVoucherStores(voucher.ID, []string{})
+	}
+
+	// Sync room templates (kosongkan jika is_all_room_types=true)
+	if !req.IsAllRoomTypes {
+		if err := repository.SyncRoomTemplates(voucher.ID, req.RoomTemplateIDs); err != nil {
+			return nil, errors.New("gagal menyimpan room template voucher")
+		}
+	} else {
+		_ = repository.SyncRoomTemplates(voucher.ID, []uint{})
 	}
 
 	return GetVoucherByID(voucher.ID)
@@ -351,6 +392,20 @@ func ValidateVoucher(req dto.ValidateVoucherRequest) (*dto.ValidateVoucherRespon
 		return &dto.ValidateVoucherResponse{IsValid: false, Message: "Voucher sudah pernah digunakan"}, nil
 	}
 
+	// Cek room type restriction
+	if !voucher.IsAllRoomTypes && len(voucher.RoomTemplates) > 0 {
+		allowedRTIDs := make(map[uint]bool)
+		for _, rt := range voucher.RoomTemplates {
+			allowedRTIDs[rt.RoomTemplateID] = true
+		}
+		if req.RoomTemplateID == 0 || !allowedRTIDs[req.RoomTemplateID] {
+			return &dto.ValidateVoucherResponse{
+				IsValid: false,
+				Message: "Voucher ini hanya berlaku untuk ruangan tertentu",
+			}, nil
+		}
+	}
+
 	discountAmount := calculateDiscount(req.Amount, voucher)
 
 	return &dto.ValidateVoucherResponse{
@@ -377,6 +432,12 @@ func calculateDiscount(amount float64, v *models.Voucher) float64 {
 		discount = amount
 	}
 	return discount
+}
+
+// GetRecipientCount menghitung berapa member yang akan menerima voucher.
+// Dipanggil FE saat admin memilih room type di form create/edit voucher.
+func GetRecipientCount(isAllRoomTypes bool, roomTemplateIDs []uint) (int64, error) {
+	return repository.CountMembersForVoucher(isAllRoomTypes, roomTemplateIDs)
 }
 
 // RedeemVoucher catat pemakaian voucher (dipanggil dari modul Booking).

@@ -12,6 +12,7 @@ import (
 	"game_lounge_be/models"
 	"game_lounge_be/modules/pricing/dto"
 	"game_lounge_be/modules/pricing/repository"
+	globalHolidayRepo "game_lounge_be/modules/global_holiday/repository"
 
 	"github.com/google/uuid"
 )
@@ -251,7 +252,7 @@ func CreateFlashSale(storeID string, req dto.CreateFlashSaleRequest, createdBy s
 		RoomTemplateID: req.RoomTemplateID,
 		Name:           req.Name,
 		Description:    &desc,
-		DiscountAmount: req.DiscountAmount,
+		PricePerHour:   req.PricePerHour,
 		DateFrom:       dateFrom,
 		DateTo:         dateTo,
 		TimeFrom:       req.TimeFrom,
@@ -291,12 +292,13 @@ func UpdateFlashSale(id string, req dto.UpdateFlashSaleRequest, updatedBy string
 
 	sale.Name = req.Name
 	sale.Description = &desc
-	sale.DiscountAmount = req.DiscountAmount
+	sale.PricePerHour = req.PricePerHour
 	sale.DateFrom = dateFrom
 	sale.DateTo = dateTo
 	sale.TimeFrom = req.TimeFrom
 	sale.TimeTo = req.TimeTo
 	sale.IsActive = isActive
+	sale.RoomTemplateID = uint(req.RoomTemplateID)
 	sale.UpdatedBy = &updatedBy
 
 	if err := repository.UpdateFlashSale(sale); err != nil {
@@ -317,7 +319,15 @@ func DeleteFlashSale(id string, deletedBy string) error {
 // ── Price Calculator ──────────────────────────────────────────
 
 // CalculatePrice menghitung harga booking berdasarkan semua aturan pricing.
-// Prioritas: Flash Sale discount > Happy Hour (Weekday) > Normal Hour / Weekend
+//
+// Pendekatan: timeline dibagi menjadi segmen kronologis:
+//   [sebelum FS] → [flash sale] → [sesudah FS]
+//
+// Segmen non-flash kemudian di-split lagi berdasarkan jadwal happy hour:
+//   [normal] → [happy hour] → [normal] → ...
+//
+// Ini memastikan: flash sale di akhir booking → jam awal dihitung normal dulu,
+// flash sale di awal → dihitung flash dulu baru normal, dll.
 func CalculatePrice(req dto.CalculatePriceRequest) (*dto.CalculatePriceResponse, error) {
 	bookingDate, err := time.Parse("2006-01-02", req.BookingDate)
 	if err != nil {
@@ -329,8 +339,7 @@ func CalculatePrice(req dto.CalculatePriceRequest) (*dto.CalculatePriceResponse,
 	if endMins <= startMins {
 		endMins += 24 * 60 // lintas tengah malam
 	}
-	totalMinutes := endMins - startMins
-	totalHours := float64(totalMinutes) / 60.0
+	totalHours := float64(endMins-startMins) / 60.0
 
 	pricing, err := repository.FindPricingConfigByStoreID(req.StoreID)
 	if err != nil {
@@ -342,80 +351,220 @@ func CalculatePrice(req dto.CalculatePriceRequest) (*dto.CalculatePriceResponse,
 		return nil, errors.New("harga paket belum dikonfigurasi untuk ruangan ini")
 	}
 
-	isWeekday := isWeekdayDate(bookingDate)
+	// Pre-fetch happy hour data sekali — dipakai semua segmen normal
+	isWeekday := isWeekdayForPricing(bookingDate, req.StoreID)
+	var schedules []models.StoreHappyHourSchedule
+	var hhPrice *models.StoreHappyHourPrice
+	if isWeekday && pricing.IsHappyHourEnabled {
+		schedules, _ = repository.FindSchedulesByStoreID(req.StoreID)
+		if hp, hpErr := repository.FindHappyHourPriceForRoom(req.StoreID, req.RoomTemplateID); hpErr == nil {
+			hhPrice = hp
+		}
+	}
 
+	// ── Tentukan irisan flash sale (jika ada) ─────────────────
+	var hasFlash bool
+	var flashName string
+	var fsOverlapStart, fsOverlapEnd int
+	var flashSale *models.StoreFlashSale
+
+	if fs, fsErr := repository.FindActiveFlashSale(
+		req.StoreID, req.RoomTemplateID, bookingDate, req.StartTime, req.EndTime,
+	); fsErr == nil && fs != nil {
+		fsStartMins := parseTimeToMinutes(fs.TimeFrom)
+		fsEndMins := parseTimeToMinutes(fs.TimeTo)
+		if fsEndMins <= fsStartMins {
+			fsEndMins += 24 * 60
+		}
+		oStart := intMax(startMins, fsStartMins)
+		oEnd := intMin(endMins, fsEndMins)
+		if oEnd > oStart {
+			flashSale = fs
+			hasFlash = true
+			flashName = fs.Name
+			fsOverlapStart = oStart
+			fsOverlapEnd = oEnd
+		}
+	}
+
+	// ── Bangun segmen kronologis & hitung harga ───────────────
 	var breakdown []dto.PriceBreakdownItem
 	var basePrice float64
 
-	if isWeekday && pricing.IsHappyHourEnabled {
-		schedules, _ := repository.FindSchedulesByStoreID(req.StoreID)
-		hhPrice, hhErr := repository.FindHappyHourPriceForRoom(req.StoreID, req.RoomTemplateID)
-
-		hhMinutes := calculateHappyHourMinutes(startMins, endMins, schedules)
-		normalMinutes := totalMinutes - hhMinutes
-		
-		if hhMinutes > 0 && hhErr == nil {
-			hhHours := float64(hhMinutes) / 60.0
-			hhTotal := hhHours * hhPrice.PricePerHour
-			basePrice += hhTotal
-			breakdown = append(breakdown, dto.PriceBreakdownItem{
-				TimeRange:   fmt.Sprintf("%s - %s", minutesToTime(startMins), minutesToTime(startMins+hhMinutes)),
-				Type:        "Happy Hour",
-				Description: fmt.Sprintf("%s Jam × Rp %.0f", formatHours(hhHours), hhPrice.PricePerHour),
-				Amount:      hhTotal,
-			})
+	if hasFlash {
+		// ① Sebelum flash sale → normal/HH
+		if fsOverlapStart > startMins {
+			p, items := priceNormalSegment(startMins, fsOverlapStart, isWeekday, pricing, packages, schedules, hhPrice)
+			basePrice += p
+			breakdown = append(breakdown, items...)
 		}
 
-		if normalMinutes > 0 {
-			normalHours := int(math.Ceil(float64(normalMinutes) / 60.0))
-			normalPrice, normalDesc := findCheapestPackage(normalHours, packages, pricing)
-			basePrice += normalPrice
-			breakdown = append(breakdown, dto.PriceBreakdownItem{
-				TimeRange:   fmt.Sprintf("%s - %s", minutesToTime(startMins+hhMinutes), minutesToTime(endMins)),
-				Type:        "Normal Hour",
-				Description: normalDesc,
-				Amount:      normalPrice,
-			})
+		// ② Flash sale window
+		fsHours := float64(fsOverlapEnd-fsOverlapStart) / 60.0
+		fsTotal := fsHours * flashSale.PricePerHour
+		basePrice += fsTotal
+		breakdown = append(breakdown, dto.PriceBreakdownItem{
+			TimeRange:   fmt.Sprintf("%s - %s", minutesToTime(fsOverlapStart), minutesToTime(fsOverlapEnd)),
+			Type:        "Flash Sale",
+			Description: fmt.Sprintf("%s — %s Jam × Rp %.0f", flashSale.Name, formatHours(fsHours), flashSale.PricePerHour),
+			Amount:      fsTotal,
+		})
+
+		// ③ Sesudah flash sale → normal/HH
+		if endMins > fsOverlapEnd {
+			p, items := priceNormalSegment(fsOverlapEnd, endMins, isWeekday, pricing, packages, schedules, hhPrice)
+			basePrice += p
+			breakdown = append(breakdown, items...)
 		}
 	} else {
-		normalHours := int(math.Ceil(totalHours))
-		normalPrice, normalDesc := findCheapestPackage(normalHours, packages, pricing)
-		basePrice = normalPrice
-		breakdown = append(breakdown, dto.PriceBreakdownItem{
-			TimeRange:   fmt.Sprintf("%s - %s", req.StartTime, req.EndTime),
-			Type:        "Normal Hour",
-			Description: normalDesc,
-			Amount:      normalPrice,
-		})
-	}
-
-	// Cek Flash Sale — prioritas tertinggi (discount dari base price)
-	flashDiscount := 0.0
-	hasFlash := false
-	flashName := ""
-	flashSale, flashErr := repository.FindActiveFlashSale(
-		req.StoreID, req.RoomTemplateID, bookingDate, req.StartTime, req.EndTime,
-	)
-	if flashErr == nil && flashSale != nil {
-		flashDiscount = flashSale.DiscountAmount
-		hasFlash = true
-		flashName = flashSale.Name
-	}
-
-	finalPrice := basePrice - flashDiscount
-	if finalPrice < 0 {
-		finalPrice = 0
+		// Tidak ada flash sale: seluruh booking adalah normal/HH
+		p, items := priceNormalSegment(startMins, endMins, isWeekday, pricing, packages, schedules, hhPrice)
+		basePrice += p
+		breakdown = append(breakdown, items...)
 	}
 
 	return &dto.CalculatePriceResponse{
 		TotalHours:    totalHours,
 		BasePrice:     basePrice,
-		FlashDiscount: flashDiscount,
-		FinalPrice:    finalPrice,
+		FlashDiscount: 0, // flash sale sudah masuk ke basePrice sebagai harga per jam
+		FinalPrice:    basePrice,
 		Breakdown:     breakdown,
 		HasFlashSale:  hasFlash,
 		FlashSaleName: flashName,
 	}, nil
+}
+
+// ── Segment Helpers ───────────────────────────────────────────
+
+// timeSlot adalah potongan waktu dalam menit dengan label tipe (HH atau normal).
+type timeSlot struct {
+	Start int
+	End   int
+	IsHH  bool
+}
+
+// splitByHappyHour membagi rentang [segStart, segEnd] menjadi slot-slot kronologis
+// berdasarkan overlap dengan jadwal happy hour.
+// Contoh: [10:00-22:00] + HH[16:00-20:00] → normal[10-16], HH[16-20], normal[20-22]
+func splitByHappyHour(segStart, segEnd int, schedules []models.StoreHappyHourSchedule) []timeSlot {
+	type interval struct{ start, end int }
+	var hhIntervals []interval
+
+	for _, s := range schedules {
+		hhStart := parseTimeToMinutes(s.StartTime)
+		hhEnd := parseTimeToMinutes(s.EndTime)
+		if hhEnd < hhStart {
+			hhEnd += 24 * 60
+		}
+		clipStart := intMax(segStart, hhStart)
+		clipEnd := intMin(segEnd, hhEnd)
+		if clipEnd > clipStart {
+			hhIntervals = append(hhIntervals, interval{clipStart, clipEnd})
+		}
+	}
+
+	sort.Slice(hhIntervals, func(i, j int) bool {
+		return hhIntervals[i].start < hhIntervals[j].start
+	})
+
+	var result []timeSlot
+	cursor := segStart
+	for _, hh := range hhIntervals {
+		if hh.start > cursor {
+			result = append(result, timeSlot{cursor, hh.start, false})
+		}
+		result = append(result, timeSlot{hh.start, hh.end, true})
+		cursor = hh.end
+	}
+	if cursor < segEnd {
+		result = append(result, timeSlot{cursor, segEnd, false})
+	}
+	if len(result) == 0 {
+		result = append(result, timeSlot{segStart, segEnd, false})
+	}
+	return result
+}
+
+// priceNormalSegment menghitung harga untuk satu segmen non-flash-sale [segStart, segEnd].
+// Di-split lebih lanjut oleh jadwal happy hour jika aktif.
+// Setiap sub-slot dihitung sendiri (HH per-jam, Normal per paket).
+func priceNormalSegment(
+	segStart, segEnd int,
+	isWeekday bool,
+	pricing *models.StorePricing,
+	packages []models.StorePackagePrice,
+	schedules []models.StoreHappyHourSchedule,
+	hhPrice *models.StoreHappyHourPrice,
+) (float64, []dto.PriceBreakdownItem) {
+	segMins := segEnd - segStart
+	if segMins <= 0 {
+		return 0, nil
+	}
+
+	var items []dto.PriceBreakdownItem
+	var totalPrice float64
+
+	useHH := isWeekday && pricing.IsHappyHourEnabled && hhPrice != nil
+
+	if !useHH {
+		// Pure normal — tidak ada HH
+		normalHours := int(math.Ceil(float64(segMins) / 60.0))
+		price, desc := findCheapestPackage(normalHours, packages, pricing)
+		return price, []dto.PriceBreakdownItem{{
+			TimeRange:   fmt.Sprintf("%s - %s", minutesToTime(segStart), minutesToTime(segEnd)),
+			Type:        "Normal Hour",
+			Description: desc,
+			Amount:      price,
+		}}
+	}
+
+	// Ada kemungkinan HH: split segmen berdasarkan jadwal
+	for _, slot := range splitByHappyHour(segStart, segEnd, schedules) {
+		slotMins := slot.End - slot.Start
+		if slotMins <= 0 {
+			continue
+		}
+		if slot.IsHH {
+			hhHours := float64(slotMins) / 60.0
+			hhTotal := hhHours * hhPrice.PricePerHour
+			totalPrice += hhTotal
+			items = append(items, dto.PriceBreakdownItem{
+				TimeRange:   fmt.Sprintf("%s - %s", minutesToTime(slot.Start), minutesToTime(slot.End)),
+				Type:        "Happy Hour",
+				Description: fmt.Sprintf("%s Jam × Rp %.0f", formatHours(hhHours), hhPrice.PricePerHour),
+				Amount:      hhTotal,
+			})
+		} else {
+			normalHours := int(math.Ceil(float64(slotMins) / 60.0))
+			price, desc := findCheapestPackage(normalHours, packages, pricing)
+			totalPrice += price
+			items = append(items, dto.PriceBreakdownItem{
+				TimeRange:   fmt.Sprintf("%s - %s", minutesToTime(slot.Start), minutesToTime(slot.End)),
+				Type:        "Normal Hour",
+				Description: desc,
+				Amount:      price,
+			})
+		}
+	}
+
+	return totalPrice, items
+}
+
+// isWeekdayForPricing cek apakah tanggal adalah weekday untuk keperluan pricing.
+// Priority: Global Holiday → Store Holiday → Regular Weekday/Weekend check.
+// Global holiday atau store holiday → treated as weekend (happy hour tidak berlaku).
+func isWeekdayForPricing(date time.Time, storeID string) bool {
+	// 1. Cek global holiday
+	if _, err := globalHolidayRepo.FindByDate(date); err == nil {
+		return false
+	}
+	// 2. Cek store-specific holiday
+	if repository.IsStoreHoliday(storeID, date) {
+		return false
+	}
+	// 3. Weekday = Senin–Kamis
+	day := date.Weekday()
+	return day >= time.Monday && day <= time.Thursday
 }
 
 // ── Helper Functions ──────────────────────────────────────────
@@ -446,30 +595,6 @@ func minutesToTime(mins int) string {
 		mins += 24 * 60
 	}
 	return fmt.Sprintf("%02d:%02d", mins/60, mins%60)
-}
-
-// isWeekdayDate mengembalikan true untuk Senin–Kamis.
-func isWeekdayDate(date time.Time) bool {
-	day := date.Weekday()
-	return day >= time.Monday && day <= time.Thursday
-}
-
-// calculateHappyHourMinutes menghitung irisan menit booking dengan window happy hour.
-func calculateHappyHourMinutes(startMins, endMins int, schedules []models.StoreHappyHourSchedule) int {
-	total := 0
-	for _, s := range schedules {
-		hhStart := parseTimeToMinutes(s.StartTime)
-		hhEnd := parseTimeToMinutes(s.EndTime)
-		if hhEnd < hhStart {
-			hhEnd += 24 * 60 // lintas tengah malam
-		}
-		overlapStart := intMax(startMins, hhStart)
-		overlapEnd := intMin(endMins, hhEnd)
-		if overlapEnd > overlapStart {
-			total += overlapEnd - overlapStart
-		}
-	}
-	return total
 }
 
 // findCheapestPackage mencari kombinasi paket termurah untuk n jam Normal Hour.
