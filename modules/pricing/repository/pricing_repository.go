@@ -195,17 +195,28 @@ func FindFlashSalesByStore(storeID string) ([]models.StoreFlashSale, error) {
 }
 
 // FindActiveFlashSale mencari flash sale aktif untuk (store, room template, date, time).
+// Flash sale sekarang menggunakan price_per_hour — irisan waktu dihitung di pricing engine.
 func FindActiveFlashSale(storeID string, roomTemplateID uint, date time.Time, startTime, endTime string) (*models.StoreFlashSale, error) {
 	var sale models.StoreFlashSale
 	dateStr := date.Format("2006-01-02")
-	err := config.DB.Where(`
-		store_id = ? AND room_template_id = ?
-		AND is_active = true AND deleted_at IS NULL
-		AND date_from <= ? AND date_to >= ?
-		AND time_from <= ? AND time_to >= ?
-	`, storeID, roomTemplateID, dateStr, dateStr, startTime, endTime).
+	err := config.DB.
+		Where("store_id = ? AND room_template_id = ?", storeID, roomTemplateID).
+		Where("is_active = true AND deleted_at IS NULL").
+		Where("date_from <= ? AND date_to >= ?", dateStr, dateStr).
+		Where("time_from < ? AND time_to > ?", endTime, startTime).
 		First(&sale).Error
 	return &sale, err
+}
+
+// IsStoreHoliday mengecek apakah tanggal tertentu adalah hari libur untuk store tertentu.
+// Dipakai oleh pricing engine untuk mematikan happy hour di hari libur store.
+func IsStoreHoliday(storeID string, date time.Time) bool {
+	var count int64
+	config.DB.Model(&models.StoreHolidaySchedule{}).
+		Where("store_id = ? AND DATE(date) = ? AND deleted_at IS NULL",
+			storeID, date.Format("2006-01-02")).
+		Count(&count)
+	return count > 0
 }
 
 // FindFlashSaleByID mencari flash sale berdasarkan id.
@@ -222,8 +233,10 @@ func CreateFlashSale(sale *models.StoreFlashSale) error {
 }
 
 // UpdateFlashSale menyimpan perubahan flash sale.
+// Omit("RoomTemplate") penting: mencegah GORM override room_template_id
+// dengan ID dari preloaded association (BelongsTo bug GORM).
 func UpdateFlashSale(sale *models.StoreFlashSale) error {
-	return config.DB.Save(sale).Error
+	return config.DB.Omit("RoomTemplate").Save(sale).Error
 }
 
 // SoftDeleteFlashSale soft-delete flash sale.

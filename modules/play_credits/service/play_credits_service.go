@@ -2,10 +2,14 @@ package service
 
 import (
 	"errors"
+	"fmt"
+	"log"
 	"math"
 	"time"
 
 	"game_lounge_be/models"
+	customerRepo "game_lounge_be/modules/customer/repository"
+	ntService "game_lounge_be/modules/notification_template/service"
 	"game_lounge_be/modules/play_credits/dto"
 	"game_lounge_be/modules/play_credits/repository"
 	"game_lounge_be/utils"
@@ -218,6 +222,33 @@ func AssignCredit(req dto.AssignCreditRequest, createdBy string) (*MemberCreditR
 	if err := repository.CreateCredit(credit); err != nil {
 		return nil, errors.New("gagal assign credits")
 	}
+
+	// Kirim notifikasi ke customer (async — tidak blokir response)
+	go func() {
+		customer, cErr := customerRepo.FindCustomerByID(req.CustomerID)
+		if cErr != nil {
+			return
+		}
+		expiryStr := credit.ExpiresAt.Format("02 January 2006")
+		tmpl, tErr := ntService.GetRendered("play_credits_assigned", map[string]string{
+			"nama_customer":       customer.Name,
+			"nama_paket":          pkg.Name,
+			"total_jam":           fmt.Sprintf("%.0f", pkg.TotalHours),
+			"sisa_jam":            fmt.Sprintf("%.0f", pkg.TotalHours),
+			"tanggal_kadaluwarsa": expiryStr,
+		})
+		if tErr != nil {
+			return // template belum ada di DB, skip notifikasi
+		}
+		if tmpl.IsEmailActive && customer.Email != nil && *customer.Email != "" {
+			if err := utils.SendEmail(*customer.Email, customer.Name, tmpl.EmailSubject, tmpl.EmailBody); err != nil {
+				log.Printf("[PlayCredits] Gagal kirim email ke %s: %v", *customer.Email, err)
+			}
+		}
+		if tmpl.IsWhatsappActive {
+			log.Printf("[PlayCredits][WhatsApp placeholder] → %s: %s", customer.Whatsapp, tmpl.WhatsappBody)
+		}
+	}()
 
 	return GetCreditByID(credit.ID)
 }

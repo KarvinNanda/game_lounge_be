@@ -60,7 +60,7 @@ type CreateFlashSaleRequest struct {
 	RoomTemplateID uint    `json:"room_template_id" binding:"required"`
 	Name           string  `json:"name" binding:"required,min=2,max=150"`
 	Description    string  `json:"description"`
-	DiscountAmount float64 `json:"discount_amount" binding:"required,gt=0"`
+	PricePerHour   float64 `json:"price_per_hour" binding:"required,gt=0"`
 	DateFrom       string  `json:"date_from" binding:"required"`
 	DateTo         string  `json:"date_to" binding:"required"`
 	TimeFrom       string  `json:"time_from" binding:"required"`
@@ -69,14 +69,15 @@ type CreateFlashSaleRequest struct {
 }
 
 type UpdateFlashSaleRequest struct {
-	Name           string  `json:"name" binding:"required,min=2,max=150"`
-	Description    string  `json:"description"`
-	DiscountAmount float64 `json:"discount_amount" binding:"required,gt=0"`
-	DateFrom       string  `json:"date_from" binding:"required"`
-	DateTo         string  `json:"date_to" binding:"required"`
-	TimeFrom       string  `json:"time_from" binding:"required"`
-	TimeTo         string  `json:"time_to" binding:"required"`
-	IsActive       *bool   `json:"is_active"`
+	RoomTemplateID uint    `json:"room_template_id" binding:"required"`
+	Name         string  `json:"name" binding:"required,min=2,max=150"`
+	Description  string  `json:"description"`
+	PricePerHour float64 `json:"price_per_hour" binding:"required,gt=0"`
+	DateFrom     string  `json:"date_from" binding:"required"`
+	DateTo       string  `json:"date_to" binding:"required"`
+	TimeFrom     string  `json:"time_from" binding:"required"`
+	TimeTo       string  `json:"time_to" binding:"required"`
+	IsActive     *bool   `json:"is_active"`
 }
 
 // ── Price Calculator ──────────────────────────────────────────

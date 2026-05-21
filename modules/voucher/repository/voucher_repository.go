@@ -16,6 +16,7 @@ func FindAllVouchers(search, status, vtype, storeID string, page, perPage int) (
 
 	query := config.DB.Model(&models.Voucher{}).
 		Preload("Stores.Store").
+		Preload("RoomTemplates.RoomTemplate").
 		Where("deleted_at IS NULL")
 
 	if search != "" {
@@ -46,7 +47,10 @@ func FindAllVouchers(search, status, vtype, storeID string, page, perPage int) (
 // FindVoucherByID mengambil voucher berdasarkan ID dengan semua relasi.
 func FindVoucherByID(id string) (*models.Voucher, error) {
 	var voucher models.Voucher
-	err := config.DB.Preload("Stores.Store").Preload("Usages.Customer").
+	err := config.DB.
+		Preload("Stores.Store").
+		Preload("Usages.Customer").
+		Preload("RoomTemplates.RoomTemplate").
 		Where("id = ? AND deleted_at IS NULL", id).First(&voucher).Error
 	return &voucher, err
 }
@@ -54,7 +58,9 @@ func FindVoucherByID(id string) (*models.Voucher, error) {
 // FindVoucherByCode mengambil voucher berdasarkan kode.
 func FindVoucherByCode(code string) (*models.Voucher, error) {
 	var voucher models.Voucher
-	err := config.DB.Preload("Stores.Store").
+	err := config.DB.
+		Preload("Stores.Store").
+		Preload("RoomTemplates.RoomTemplate").
 		Where("code = ? AND deleted_at IS NULL", code).First(&voucher).Error
 	return &voucher, err
 }
@@ -211,4 +217,62 @@ func CountAllMembers() int64 {
 	config.DB.Model(&models.Customer{}).
 		Where("type = 'member' AND status = 'active' AND deleted_at IS NULL").Count(&count)
 	return count
+}
+
+// ── Room Template Junction ────────────────────────────────────────────────────
+
+// SyncRoomTemplates menyinkronkan room template yang boleh menggunakan voucher.
+// Hapus semua yang lama, insert yang baru.
+func SyncRoomTemplates(voucherID string, roomTemplateIDs []uint) error {
+	if err := config.DB.Where("voucher_id = ?", voucherID).
+		Delete(&models.VoucherRoomTemplate{}).Error; err != nil {
+		return err
+	}
+	for _, rtID := range roomTemplateIDs {
+		if err := config.DB.Create(&models.VoucherRoomTemplate{
+			VoucherID:      voucherID,
+			RoomTemplateID: rtID,
+		}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// GetMembersForVoucher mengambil member yang akan menerima voucher.
+// Jika is_all_room_types = true → semua member aktif.
+// Jika false → member yang punya salah satu dari room_template_ids sebagai favorit.
+func GetMembersForVoucher(voucherID string, isAllRoomTypes bool, roomTemplateIDs []uint) ([]models.Customer, error) {
+	var members []models.Customer
+
+	query := config.DB.Where("type = 'member' AND status = 'active' AND deleted_at IS NULL")
+
+	if !isAllRoomTypes && len(roomTemplateIDs) > 0 {
+		// Hanya member yang punya minimal 1 room type tsb sebagai favorit
+		query = query.Where(`id IN (
+			SELECT DISTINCT customer_id FROM customer_favorite_room_types
+			WHERE room_template_id IN ?
+		)`, roomTemplateIDs)
+	}
+
+	err := query.Find(&members).Error
+	return members, err
+}
+
+// CountMembersForVoucher menghitung berapa member yang akan menerima.
+// Dipakai FE untuk preview jumlah penerima sebelum kirim.
+func CountMembersForVoucher(isAllRoomTypes bool, roomTemplateIDs []uint) (int64, error) {
+	var count int64
+	query := config.DB.Model(&models.Customer{}).
+		Where("type = 'member' AND status = 'active' AND deleted_at IS NULL")
+
+	if !isAllRoomTypes && len(roomTemplateIDs) > 0 {
+		query = query.Where(`id IN (
+			SELECT DISTINCT customer_id FROM customer_favorite_room_types
+			WHERE room_template_id IN ?
+		)`, roomTemplateIDs)
+	}
+
+	err := query.Count(&count).Error
+	return count, err
 }

@@ -40,6 +40,7 @@ func AuthMiddleware() gin.HandlerFunc {
 		c.Set("staff_id", claims.StaffID)
 		c.Set("staff_username", claims.Username)
 		c.Set("role_id", claims.RoleID)
+		c.Set("staff_role_id", claims.RoleID) // alias eksplisit untuk kontrol akses
 		c.Set("is_system", claims.IsSystem)
 		c.Set("permissions", claims.Permissions)
 		c.Next()

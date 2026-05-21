@@ -15,6 +15,7 @@ import (
 	creditsRepo "game_lounge_be/modules/play_credits/repository"
 	pricingDto "game_lounge_be/modules/pricing/dto"
 	pricingService "game_lounge_be/modules/pricing/service"
+	storeService "game_lounge_be/modules/store/service"
 	voucherDto "game_lounge_be/modules/voucher/dto"
 	voucherService "game_lounge_be/modules/voucher/service"
 	"game_lounge_be/utils"
@@ -165,11 +166,12 @@ func CreateBooking(req dto.CreateBookingRequest, createdBy string) (*BookingWith
 		customer, cErr := customerRepo.FindCustomerByID(req.CustomerID)
 		if cErr == nil && customer.Type == "member" {
 			vResult, vErr := voucherService.ValidateVoucher(voucherDto.ValidateVoucherRequest{
-				Code:       req.VoucherCode,
-				CustomerID: req.CustomerID,
-				StoreID:    req.StoreID,
-				Amount:     basePrice,
-				UseType:    "booking",
+				Code:           req.VoucherCode,
+				CustomerID:     req.CustomerID,
+				StoreID:        req.StoreID,
+				Amount:         basePrice,
+				UseType:        "booking",
+				RoomTemplateID: roomTemplateID,
 			})
 			if vErr == nil && vResult.IsValid {
 				discountAmount = vResult.DiscountAmount
@@ -369,15 +371,37 @@ type DashboardRoom struct {
 
 // DashboardData adalah response untuk kalender grid.
 type DashboardData struct {
-	Date    string          `json:"date"`
-	StoreID string          `json:"store_id"`
-	Rooms   []DashboardRoom `json:"rooms"`
+	Date        string          `json:"date"`
+	StoreID     string          `json:"store_id"`
+	OpenTime    string          `json:"open_time"`    // jam buka efektif
+	CloseTime   string          `json:"close_time"`   // jam tutup efektif
+	IsHoliday   bool            `json:"is_holiday"`   // apakah hari libur
+	HolidayName string          `json:"holiday_name"` // nama hari libur
+	HolidayType string          `json:"holiday_type"` // "global" | "store" | ""
+	Rooms       []DashboardRoom `json:"rooms"`
 }
 
 // GetDashboard mengambil data untuk render kalender grid.
 func GetDashboard(filter dto.DashboardFilter) (*DashboardData, error) {
 	// Update status terlebih dahulu
 	_ = repository.BatchUpdateStatus(filter.StoreID, filter.Date)
+
+	// Ambil jam operasional efektif (cek global holiday + store holiday)
+	openTime := "10:00:00"
+	closeTime := "02:00:00"
+	isHoliday := false
+	holidayName := ""
+	holidayType := ""
+
+	if date, err := time.Parse("2006-01-02", filter.Date); err == nil {
+		if opHours, err := storeService.GetEffectiveOperatingHours(filter.StoreID, date); err == nil && opHours != nil {
+			openTime = opHours.OpenTime
+			closeTime = opHours.CloseTime
+			isHoliday = opHours.IsHoliday
+			holidayName = opHours.HolidayName
+			holidayType = opHours.HolidayType
+		}
+	}
 
 	rooms, err := repository.FindRoomsForStore(filter.StoreID)
 	if err != nil {
@@ -412,15 +436,20 @@ func GetDashboard(filter dto.DashboardFilter) (*DashboardData, error) {
 	}
 
 	return &DashboardData{
-		Date:    filter.Date,
-		StoreID: filter.StoreID,
-		Rooms:   dashRooms,
+		Date:        filter.Date,
+		StoreID:     filter.StoreID,
+		OpenTime:    openTime,
+		CloseTime:   closeTime,
+		IsHoliday:   isHoliday,
+		HolidayName: holidayName,
+		HolidayType: holidayType,
+		Rooms:       dashRooms,
 	}, nil
 }
 
-// GetSessionsEndingSoon mengambil sesi yang akan berakhir dalam 30 menit.
+// GetSessionsEndingSoon mengambil sesi yang akan berakhir dalam 5 menit.
 func GetSessionsEndingSoon(storeID string) ([]BookingWithComputed, error) {
-	bookings, err := repository.FindSessionsEndingSoon(storeID, 30)
+	bookings, err := repository.FindSessionsEndingSoon(storeID, 5)
 	if err != nil {
 		return nil, err
 	}

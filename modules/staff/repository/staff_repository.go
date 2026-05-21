@@ -97,3 +97,11 @@ func SoftDeleteStaff(staff *models.Staff, deletedBy string) error {
 		"deleted_at": config.DB.NowFunc(),
 	}).Error
 }
+
+
+// UpdatePassword menyimpan password hash baru untuk staff.
+func UpdatePassword(staffID, hashedPassword string) error {
+	return config.DB.Model(&models.Staff{}).
+		Where("id = ?", staffID).
+		Update("password_hash", hashedPassword).Error
+}

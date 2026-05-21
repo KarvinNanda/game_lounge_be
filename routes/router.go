@@ -6,6 +6,7 @@ import (
 	bookingCtrl "game_lounge_be/modules/booking/controller"
 	customerCtrl "game_lounge_be/modules/customer/controller"
 	facilityCtrl "game_lounge_be/modules/facility/controller"
+	globalHolidayCtrl "game_lounge_be/modules/global_holiday/controller"
 	ntCtrl "game_lounge_be/modules/notification_template/controller"
 	playCreditsCtrl "game_lounge_be/modules/play_credits/controller"
 	pricingCtrl "game_lounge_be/modules/pricing/controller"
@@ -55,6 +56,7 @@ func SetupRouter() *gin.Engine {
 		protected.GET("staffs/:id", staffCtrl.GetByID)
 		protected.PUT("staffs/:id", staffCtrl.Update)
 		protected.DELETE("staffs/:id", staffCtrl.Delete)
+		protected.POST("staffs/:id/reset-password", staffCtrl.ResetPassword)
 
 		// Facility Categories
 		protected.GET("facility-categories", facilityCtrl.GetAllCategories)
@@ -77,11 +79,17 @@ func SetupRouter() *gin.Engine {
 		protected.DELETE("room-templates/:id", roomTemplateCtrl.Delete)
 
 		// Stores
+		// Note: rute statis (operating-hours) didaftarkan SEBELUM /:id
+		// supaya Gin tidak mengira "operating-hours" adalah store_id.
 		protected.GET("stores", storeCtrl.GetAll)
 		protected.POST("stores", storeCtrl.Create)
+		protected.GET("stores/operating-hours", storeCtrl.GetOperatingHours)
 		protected.GET("stores/:id", storeCtrl.GetByID)
 		protected.PUT("stores/:id", storeCtrl.Update)
 		protected.DELETE("stores/:id", storeCtrl.Delete)
+
+		// Store Rooms
+		protected.PATCH("store-rooms/:id/toggle", storeCtrl.ToggleRoomActive)
 
 		// ── Pricing ───────────────────────────────────────────
 		// Note: rute statis (calculate, flash-sales) didaftarkan SEBELUM /:store_id
@@ -159,11 +167,12 @@ func SetupRouter() *gin.Engine {
 		protected.PATCH("bookings/:id/complete", bookingCtrl.Complete)
 
 		// ── Vouchers ──────────────────────────────────────────
-		// Note: "generate-code" & "validate" didaftarkan SEBELUM /:id
+		// Note: rute statis didaftarkan SEBELUM /:id
 		// agar Gin tidak menganggap path segment tersebut sebagai ID.
 		protected.GET("vouchers", voucherCtrl.GetAll)
 		protected.GET("vouchers/generate-code", voucherCtrl.GenerateCode)
 		protected.GET("vouchers/customer-available", voucherCtrl.GetCustomerAvailable)
+		protected.GET("vouchers/recipient-count", voucherCtrl.GetRecipientCount)
 		protected.POST("vouchers/validate", voucherCtrl.Validate)
 		protected.POST("vouchers", voucherCtrl.Create)
 		protected.GET("vouchers/:id", voucherCtrl.GetByID)
@@ -178,6 +187,12 @@ func SetupRouter() *gin.Engine {
 		protected.PATCH("customers/:id/notes", customerCtrl.UpdateNotes)
 		protected.DELETE("customers/:id", customerCtrl.Delete)
 		protected.POST("customers/:id/resend-password", customerCtrl.ResendPassword)
+
+		// ── Global Holidays ───────────────────────────────────
+		protected.GET("global-holidays", globalHolidayCtrl.GetAll)
+		protected.POST("global-holidays", globalHolidayCtrl.Create)
+		protected.PUT("global-holidays/:id", globalHolidayCtrl.Update)
+		protected.DELETE("global-holidays/:id", globalHolidayCtrl.Delete)
 	}
 
 	return r
