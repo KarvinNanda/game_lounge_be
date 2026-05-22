@@ -128,13 +128,14 @@ func CreateBooking(req dto.CreateBookingRequest, createdBy string) (*BookingWith
 		return nil, errors.New("format booking_date tidak valid (YYYY-MM-DD)")
 	}
 
-	// 2. Cek overlap — tidak boleh ada booking lain di room yg sama pada slot yg sama
-	hasOverlap, err := repository.CheckOverlap(req.RoomID, req.BookingDate, req.StartTime, req.EndTime, "")
+	// 2. Cek overlap — tidak boleh ada booking lain di room yg sama, atau event booking
+	// yang memblokir seluruh store, pada slot yang sama.
+	hasOverlap, err := repository.CheckOverlap(req.RoomID, req.StoreID, req.BookingDate, req.StartTime, req.EndTime, "")
 	if err != nil {
 		return nil, errors.New("gagal mengecek ketersediaan slot")
 	}
 	if hasOverlap {
-		return nil, errors.New("slot waktu sudah terisi oleh booking lain")
+		return nil, errors.New("slot waktu sudah terisi oleh booking atau event lain")
 	}
 
 	// 3. Ambil room template ID untuk pricing engine

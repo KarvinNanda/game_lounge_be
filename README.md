@@ -4,6 +4,8 @@ REST API untuk manajemen game lounge — mengelola store, staff, room template, 
 
 **Tech Stack:** Go · Gin · GORM · MySQL · JWT · SMTP
 
+**Fitur utama:** Auth · Roles & Staff · Store & Room · Pricing Engine (HH/Package/Flash Sale) · Booking · Event Booking · Play Credits · Voucher · Customer · Sales Report · Admin Recovery (forgot password)
+
 ---
 
 ## Prasyarat
@@ -113,22 +115,27 @@ game_lounge_be/
 │   ├── store_operating_hour.go
 │   ├── store_holiday_schedule.go
 │   ├── store_room.go
-│   ├── pricing_config.go         # Konfigurasi harga per store
-│   ├── happy_hour_schedule.go    # Jadwal happy hour
-│   ├── happy_hour_price.go       # Harga happy hour per room type
-│   ├── package_price.go          # Harga paket durasi
-│   ├── flash_sale.go             # Flash sale (diskon sementara)
+│   ├── store_pricing.go          # Konfigurasi harga per store
+│   ├── store_happy_hour_schedule.go  # Jadwal happy hour
+│   ├── store_happy_hour_price.go     # Harga happy hour per room type
+│   ├── store_package_price.go        # Harga paket durasi
+│   ├── store_flash_sale.go           # Flash sale (diskon sementara)
+│   ├── store_event_price.go          # Harga event per hari per store
 │   ├── play_credits_package.go   # Paket play credits
 │   ├── play_credits_package_store.go  # Junction: package ↔ store
 │   ├── customer_play_credit.go   # Kepemilikan play credits per customer
 │   ├── voucher.go                # Voucher / promo
 │   ├── voucher_store.go          # Junction: voucher ↔ store
+│   ├── voucher_room_template.go  # Junction: voucher ↔ room template (room type targeting)
 │   ├── voucher_usage.go          # Riwayat pemakaian voucher
 │   ├── customer.go               # Customer (member & walk-in)
 │   ├── customer_favorite_room_type.go  # Preferensi room type customer
-│   ├── booking.go                # Booking sesi bermain
-│   ├── booking_sequence.go       # Counter auto-increment untuk kode booking
-│   └── global_holiday_schedule.go  # Hari libur nasional/global (menonaktifkan happy hour)
+│   ├── booking.go                # Booking sesi bermain per ruangan
+│   ├── booking_sequence.go       # Counter global untuk kode booking (BK- / EV-)
+│   ├── event_booking.go          # Booking seluruh gedung untuk event (ulang tahun, corporate, dll)
+│   ├── global_holiday_schedule.go  # Hari libur nasional/global (menonaktifkan happy hour)
+│   ├── notification_template.go  # Template email & WhatsApp yang bisa dikustomisasi
+│   └── password_reset_token.go   # Token one-time-use untuk reset password super admin
 │
 ├── modules/                      # Fitur-fitur API, masing-masing modul mandiri
 │   │
@@ -216,6 +223,17 @@ game_lounge_be/
 │   │   ├── repository/           # FindAll, FindByKey, UpdateByKey
 │   │   └── service/              # GetRendered (dipakai customer/voucher/booking/play_credits service)
 │   │
+│   ├── event_booking/
+│   │   ├── controller/           # CRUD event booking + dashboard + preview-price + cancel
+│   │   ├── dto/                  # CreateEventBookingRequest, EventBookingFilter, CancelEventBookingRequest
+│   │   ├── repository/           # CRUD + CheckOverlapWithRegular/Event + BatchUpdateStatus + UpsertEventPrice
+│   │   └── service/              # calculateTotalPrice (price/day÷24×hours), computeStatus, PreviewPrice
+│   │
+│   ├── admin_recovery/
+│   │   ├── controller/           # Request, Validate, Reset — selalu response sama (security)
+│   │   ├── repository/           # GenerateToken, FindSuperAdminByEmail, CountRequestsFromIP, MarkTokenUsed
+│   │   └── service/              # RequestReset (rate limit 3/jam/IP, async email), ValidateToken, ResetPassword
+│   │
 │   └── upload/
 │       └── controller/           # POST /upload — simpan file ke ./assets/img/{folder}/
 │
@@ -259,6 +277,11 @@ Base URL: `/api/v1`
 |--------|----------|------------|
 | POST | `/auth/login` | Login, mendapat JWT token |
 | POST | `/upload` | Upload file gambar |
+| POST | `/admin-recovery/request` | Kirim link reset password ke email super admin |
+| GET | `/admin-recovery/:token/validate` | Validasi token sebelum form reset ditampilkan |
+| POST | `/admin-recovery/:token/reset` | Reset password super admin dengan token yang valid |
+
+> **Admin Recovery** — response `/request` selalu sama (200 OK) agar penyerang tidak tahu apakah email terdaftar. Rate limit: maks 3 request/jam per IP. Token berlaku 15 menit dan hanya bisa dipakai 1 kali.
 
 **Upload** — `multipart/form-data`:
 - `file` *(required)* — file gambar (jpg, png, webp, svg, maks 2MB)
@@ -333,6 +356,8 @@ Response:
 | GET | `/stores/:id` | Detail store (+ rooms → template → facilities → category) |
 | PUT | `/stores/:id` | Update store |
 | DELETE | `/stores/:id` | Hapus store (soft delete) |
+| GET | `/stores/:id/event-price` | Ambil harga event per hari untuk store ini |
+| PUT | `/stores/:id/event-price` | Set/update harga event per hari untuk store ini |
 
 **`GET /stores/operating-hours`** — query params: `store_id` *(required)*, `date` *(required, YYYY-MM-DD)*
 
@@ -467,6 +492,37 @@ Priority: **Global Holiday** → **Store Holiday** → **Regular Hours** (weekda
 }
 ```
 
+#### Event Bookings
+| Method | Endpoint | Keterangan |
+|--------|----------|------------|
+| GET | `/event-bookings` | List event booking (filter: store_id, status, date_from, date_to) |
+| POST | `/event-bookings` | Buat event booking baru |
+| GET | `/event-bookings/dashboard` | Event booking aktif untuk grid kalender (query: `store_id`, `date`) |
+| GET | `/event-bookings/preview-price` | Preview estimasi harga (query: `store_id`, `start_time`, `end_time`) |
+| GET | `/event-bookings/:id` | Detail event booking |
+| PATCH | `/event-bookings/:id/cancel` | Batalkan event booking |
+
+**Body `POST /event-bookings`:**
+```json
+{
+  "store_id": "uuid-store",
+  "event_name": "Ulang Tahun Andi",
+  "customer_name": "Budi Santoso",
+  "customer_whatsapp": "08123456789",
+  "customer_email": "budi@example.com",
+  "booking_date": "2025-12-25",
+  "start_time": "10:00",
+  "end_time": "22:00",
+  "notes": "Tolong siapkan dekorasi"
+}
+```
+
+> - `duration_hours` **dihitung otomatis** dari selisih `start_time` dan `end_time`, tidak perlu diisi.
+> - `total_price` dihitung: `round((price_per_day ÷ 24 × duration_hours) / 1000) × 1000` (dibulatkan ke Rp 1.000 terdekat).
+> - Harga event per store dikonfigurasi via `PUT /stores/:id/event-price`.
+> - Event booking **memblokir seluruh store** — regular booking yang waktunya overlap akan ditolak secara otomatis.
+> - Jika ada regular booking yang sudah terlanjur ada di jam tersebut, create event booking akan gagal dengan pesan error.
+
 #### Notification Templates
 | Method | Endpoint | Keterangan |
 |--------|----------|------------|
@@ -588,13 +644,26 @@ Urutan penerapan harga saat `POST /pricing/calculate` atau membuat booking:
 
 ```
 POST /bookings
-  ├── Cek overlap jadwal room
+  ├── Cek overlap jadwal room (regular booking di room yang sama)
+  ├── Cek overlap event booking (event aktif di store yang sama pada jam tersebut)
   ├── Hitung harga via pricing engine
   ├── Validasi voucher (opsional, khusus member)
   ├── Validasi play credits (opsional, khusus member)
   ├── Generate kode booking (BK-YYMMDD-XXXX)
   ├── Simpan record booking
   └── [goroutine] Potong play credits + redeem voucher + kirim email notifikasi
+```
+
+## Alur Event Booking
+
+```
+POST /event-bookings
+  ├── Hitung durasi otomatis dari start_time - end_time
+  ├── Cek overlap: ada regular booking di store & jam tersebut? → tolak
+  ├── Cek overlap: ada event booking lain di store & jam tersebut? → tolak
+  ├── Ambil harga event dari store_event_prices
+  ├── Hitung total: round((price_per_day ÷ 24 × hours) / 1000) × 1000
+  └── Simpan event booking (status: upcoming)
 ```
 
 ---
