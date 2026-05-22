@@ -6,6 +6,7 @@ import (
 
 	"game_lounge_be/config"
 	"game_lounge_be/models"
+	eventRepo "game_lounge_be/modules/event_booking/repository"
 )
 
 // ── Sequence ──────────────────────────────────────────────────────────────────
@@ -154,13 +155,16 @@ func FindRoomsForStore(storeID string) ([]models.StoreRoom, error) {
 
 // CheckOverlap memvalidasi apakah slot waktu sudah terisi booking lain.
 // Overlap: newStart < existEnd AND newEnd > existStart.
-func CheckOverlap(roomID, bookingDate, startTime, endTime, excludeID string) (bool, error) {
+// Selain mengecek regular booking per room, juga mengecek event booking
+// yang memblokir seluruh store pada slot yang sama.
+func CheckOverlap(roomID, storeID, bookingDate, startTime, endTime, excludeID string) (bool, error) {
 	startMins := parseTimeToMinutes(startTime)
 	endMins := parseTimeToMinutes(endTime)
 	if endMins <= startMins {
 		endMins += 24 * 60 // lintas tengah malam
 	}
 
+	// 1. Cek regular booking di room yang sama
 	var existingBookings []models.Booking
 	query := config.DB.Where("room_id = ? AND booking_date = ? AND status != 'cancelled'", roomID, bookingDate)
 	if excludeID != "" {
@@ -180,6 +184,15 @@ func CheckOverlap(roomID, bookingDate, startTime, endTime, excludeID string) (bo
 			return true, nil
 		}
 	}
+
+	// 2. Cek event booking yang memblokir seluruh store
+	if storeID != "" {
+		hasEvent, _ := eventRepo.CheckOverlapWithEvent(storeID, bookingDate, startTime, endTime, "")
+		if hasEvent {
+			return true, nil
+		}
+	}
+
 	return false, nil
 }
 

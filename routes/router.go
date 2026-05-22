@@ -6,6 +6,7 @@ import (
 	authCtrl "game_lounge_be/modules/auth/controller"
 	bookingCtrl "game_lounge_be/modules/booking/controller"
 	customerCtrl "game_lounge_be/modules/customer/controller"
+	eventCtrl "game_lounge_be/modules/event_booking/controller"
 	facilityCtrl "game_lounge_be/modules/facility/controller"
 	globalHolidayCtrl "game_lounge_be/modules/global_holiday/controller"
 	ntCtrl "game_lounge_be/modules/notification_template/controller"
@@ -199,6 +200,21 @@ func SetupRouter() *gin.Engine {
 		protected.POST("global-holidays", globalHolidayCtrl.Create)
 		protected.PUT("global-holidays/:id", globalHolidayCtrl.Update)
 		protected.DELETE("global-holidays/:id", globalHolidayCtrl.Delete)
+
+		// ── Event Bookings ────────────────────────────────────
+		// Note: rute statis (dashboard, preview-price) didaftarkan SEBELUM /:id
+		// agar Gin tidak menganggap path segment tersebut sebagai ID.
+		protected.GET("event-bookings", eventCtrl.GetAll)
+		protected.POST("event-bookings", eventCtrl.Create)
+		protected.GET("event-bookings/dashboard", eventCtrl.GetForDashboard)
+		protected.GET("event-bookings/preview-price", eventCtrl.PreviewPrice)
+		protected.GET("event-bookings/:id", eventCtrl.GetByID)
+		protected.PATCH("event-bookings/:id/cancel", eventCtrl.Cancel)
+
+		// ── Event Pricing (per store) ─────────────────────────
+		// Pakai :id (sama dengan stores/:id) agar tidak conflict di Gin router tree.
+		protected.GET("stores/:id/event-price", eventCtrl.GetEventPrice)
+		protected.PUT("stores/:id/event-price", eventCtrl.UpsertEventPrice)
 	}
 
 	return r
