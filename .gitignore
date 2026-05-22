@@ -27,3 +27,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Unit tests (local only — not committed to repo)
+*_test.go

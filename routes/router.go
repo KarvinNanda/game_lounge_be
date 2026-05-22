@@ -2,6 +2,7 @@ package routes
 
 import (
 	"game_lounge_be/middleware"
+	recoveryCtrl "game_lounge_be/modules/admin_recovery/controller"
 	authCtrl "game_lounge_be/modules/auth/controller"
 	bookingCtrl "game_lounge_be/modules/booking/controller"
 	customerCtrl "game_lounge_be/modules/customer/controller"
@@ -34,6 +35,11 @@ func SetupRouter() *gin.Engine {
 	// ── Public endpoints (no auth) ────────────────────────────
 	api.POST("/auth/login", authCtrl.Login)
 	api.POST("/upload", uploadCtrl.Upload) // file upload, returns path
+
+	// ── Admin Recovery (forgot password super admin) ──────────
+	api.POST("/admin-recovery/request",          recoveryCtrl.Request)
+	api.GET("/admin-recovery/:token/validate",    recoveryCtrl.Validate)
+	api.POST("/admin-recovery/:token/reset",      recoveryCtrl.Reset)
 
 	// ── Protected endpoints ───────────────────────────────────
 	protected := api.Group("/")
