@@ -269,7 +269,7 @@ game_lounge_be/
 
 ## API Endpoints
 
-Base URL: `/api/v1`
+Base URL: `/api`
 
 ### 🔓 Public (tanpa auth)
 

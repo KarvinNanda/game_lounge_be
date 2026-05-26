@@ -29,5 +29,14 @@ type EventBooking struct {
 	CreatedAt        time.Time  `json:"created_at"`
 	UpdatedAt        time.Time  `json:"updated_at"`
 
-	Store Store `gorm:"foreignKey:StoreID" json:"store,omitempty"`
+	// Field untuk customer web booking (nullable — admin booking tidak pakai ini)
+	CustomerID       *string    `gorm:"type:char(36);index" json:"customer_id"`
+	IsCustomerBooking bool      `gorm:"default:false" json:"is_customer_booking"`
+	PaymentStatus    *string    `gorm:"type:enum('pending_payment','paid','failed')" json:"payment_status"`
+	PaymentMethod    *string    `gorm:"size:50" json:"payment_method"`
+	XenditInvoiceID  *string    `gorm:"size:255" json:"xendit_invoice_id"`
+	XenditInvoiceURL *string    `gorm:"size:500" json:"xendit_invoice_url"`
+
+	Store    Store     `gorm:"foreignKey:StoreID"    json:"store,omitempty"`
+	Customer *Customer `gorm:"foreignKey:CustomerID" json:"customer,omitempty"`
 }

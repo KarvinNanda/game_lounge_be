@@ -1,6 +1,11 @@
 package utils
 
-import "fmt"
+import (
+	"fmt"
+	"log"
+
+	"game_lounge_be/models"
+)
 
 // BuildBookingEmailHTML membuat HTML email konfirmasi booking yang menarik.
 // Dipakai sebagai fallback ketika template DB belum diisi admin.
@@ -111,6 +116,37 @@ func BuildBookingEmailHTML(bookingCode, customerName, roomName, date, startTime,
 		totalHarga,
 	)
 }
+
+// SendBookingConfirmationEmail mengirim email konfirmasi booking ke customer.
+// Dipanggil secara async (goroutine) setelah Xendit webhook PAID diterima.
+func SendBookingConfirmationEmail(customer models.Customer, booking *models.Booking, store models.Store) {
+	if customer.Email == nil || *customer.Email == "" {
+		return
+	}
+
+	// Ambil nama ruangan dari relasi jika ada
+	roomName := ""
+	if booking.Room.RoomTemplate.Name != "" {
+		roomName = booking.Room.RoomTemplate.Name
+	}
+
+	html := BuildBookingEmailHTML(
+		booking.BookingCode,
+		customer.Name,
+		roomName,
+		booking.BookingDate.Format("02 January 2006"),
+		booking.StartTime,
+		booking.EndTime,
+		fmt.Sprintf("%.0f jam", booking.DurationHours),
+		fmt.Sprintf("Rp %.0f", booking.TotalPrice),
+	)
+
+	subject := fmt.Sprintf("Konfirmasi Booking %s — %s", booking.BookingCode, store.Name)
+	if err := SendHTMLEmail(*customer.Email, customer.Name, subject, html); err != nil {
+		log.Printf("[email] gagal kirim konfirmasi booking %s: %v", booking.BookingCode, err)
+	}
+}
+
 
 // BuildVoucherEmailHTML membuat HTML email notifikasi voucher yang menarik.
 // Dipakai sebagai fallback ketika template DB belum diisi admin.
