@@ -7,7 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// Upload handles POST /api/v1/upload
+// Upload handles POST /api/upload
 // Content-Type: multipart/form-data
 // Fields:
 //   - file   : image file (required)

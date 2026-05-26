@@ -4,7 +4,10 @@ import (
 	"game_lounge_be/middleware"
 	recoveryCtrl "game_lounge_be/modules/admin_recovery/controller"
 	authCtrl "game_lounge_be/modules/auth/controller"
+	bannerCtrl "game_lounge_be/modules/banner/controller"
 	bookingCtrl "game_lounge_be/modules/booking/controller"
+	bookingCustomerCtrl "game_lounge_be/modules/customer_booking/controller"
+	customerAppCtrl "game_lounge_be/modules/customer_app/controller"
 	customerCtrl "game_lounge_be/modules/customer/controller"
 	eventCtrl "game_lounge_be/modules/event_booking/controller"
 	facilityCtrl "game_lounge_be/modules/facility/controller"
@@ -31,7 +34,7 @@ func SetupRouter() *gin.Engine {
 	r.Static("/assets/img", "./assets/img") // primary asset dir (used by /upload)
 	r.Static("/uploads", "./uploads")       // legacy upload dir
 
-	api := r.Group("/api/v1")
+	api := r.Group("/api")
 
 	// ── Public endpoints (no auth) ────────────────────────────
 	api.POST("/auth/login", authCtrl.Login)
@@ -215,7 +218,77 @@ func SetupRouter() *gin.Engine {
 		// Pakai :id (sama dengan stores/:id) agar tidak conflict di Gin router tree.
 		protected.GET("stores/:id/event-price", eventCtrl.GetEventPrice)
 		protected.PUT("stores/:id/event-price", eventCtrl.UpsertEventPrice)
+
+		// ── Banners (admin) ───────────────────────────────────
+		// Note: rute statis (admin, reorder) didaftarkan SEBELUM /:id
+		// agar Gin tidak menganggap "admin" atau "reorder" sebagai ID.
+		// GET public banners ada di /public group di bawah.
+		protected.GET("banners/admin", bannerCtrl.GetAllAdmin)
+		protected.PATCH("banners/reorder", bannerCtrl.Reorder)
+		protected.POST("banners", bannerCtrl.Create)
+		protected.PUT("banners/:id", bannerCtrl.Update)
+		protected.DELETE("banners/:id", bannerCtrl.Delete)
+		protected.PATCH("banners/:id/toggle", bannerCtrl.ToggleActive)
 	}
+
+	// ── Customer auth (tidak perlu JWT) ──────────────────────────
+	customerAuth := api.Group("/customer")
+	{
+		customerAuth.POST("/login",                          customerAppCtrl.Login)
+		customerAuth.POST("/forgot-password",                customerAppCtrl.ForgotPassword)
+		customerAuth.GET("/reset-password/:token/validate",  customerAppCtrl.ValidateResetToken)
+		customerAuth.POST("/reset-password/:token",          customerAppCtrl.ResetPassword)
+	}
+
+	// ── Customer protected (perlu customer JWT) ───────────────────
+	customerProtected := api.Group("/customer")
+	customerProtected.Use(middleware.CustomerAuth())
+	{
+		customerProtected.GET("/me",                    customerAppCtrl.Me)
+		customerProtected.GET("/room-recommendations",  customerAppCtrl.RoomRecommendations)
+		customerProtected.POST("/logout",               customerAppCtrl.Logout)
+		customerProtected.PUT("/profile",               customerAppCtrl.UpdateProfile)
+		customerProtected.PUT("/change-password",       customerAppCtrl.ChangePassword)
+		customerProtected.GET("/credits/expiring",      customerAppCtrl.CreditsExpiring)
+
+		// ── Customer Bookings ─────────────────────────────────────────────────
+		// Note: rute statis (initiate) didaftarkan SEBELUM /:id agar tidak
+		// dianggap sebagai hold_id/booking_id oleh Gin.
+		customerProtected.POST("/bookings/initiate",             bookingCustomerCtrl.InitiateBooking)
+		customerProtected.GET("/bookings",                       bookingCustomerCtrl.GetMyBookings)
+		customerProtected.GET("/bookings/:id",                   bookingCustomerCtrl.GetMyBookingByID)
+		// Mock payment — hanya aktif saat XENDIT_SECRET_KEY kosong
+		customerProtected.POST("/bookings/:hold_id/mock-confirm",              bookingCustomerCtrl.MockConfirm)
+
+		// ── Play Credits Purchase ─────────────────────────────────────────────
+		customerProtected.POST("/play-credits/purchase/initiate",                customerAppCtrl.InitiatePlayCreditsPurchase)
+		customerProtected.POST("/play-credits/purchase/:intent_id/mock-confirm", customerAppCtrl.MockConfirmPlayCredits)
+
+		// ── My Data ───────────────────────────────────────────────────────────
+		customerProtected.GET("/my-credits",                                     customerAppCtrl.GetMyCredits)
+		customerProtected.GET("/vouchers/available",                             customerAppCtrl.GetMyVouchers)
+
+		// ── Customer Event Booking ────────────────────────────────────────────
+		// Note: rute statis (initiate) didaftarkan SEBELUM /:event_id
+		customerProtected.POST("/event-bookings/initiate",                       customerAppCtrl.InitiateEventBooking)
+		customerProtected.POST("/event-bookings/:event_id/mock-confirm",         customerAppCtrl.MockConfirmEventBooking)
+	}
+
+	// ── Public (tanpa auth, untuk customer web) ───────────────────
+	publicGroup := api.Group("/public")
+	{
+		publicGroup.GET("/banners",                     bannerCtrl.GetAllPublic)
+		publicGroup.GET("/banners/:id",                 bannerCtrl.GetByID)
+		publicGroup.GET("/stores",                      customerAppCtrl.PublicGetStores)
+		publicGroup.GET("/stores/:id",                  customerAppCtrl.PublicGetStoreByID)
+		publicGroup.GET("/room-templates",              customerAppCtrl.PublicGetRoomTemplates)
+		publicGroup.GET("/booking/availability",          bookingCustomerCtrl.GetAvailability)
+		publicGroup.GET("/play-credits/packages",         customerAppCtrl.PublicGetPlayCreditsPackages)
+		publicGroup.GET("/event-booking/availability",    customerAppCtrl.CheckEventAvailability)
+	}
+
+	// ── Xendit Webhook (tanpa auth, verifikasi via x-callback-token) ──────────
+	r.POST("/webhook/xendit", bookingCustomerCtrl.XenditWebhook)
 
 	return r
 }
