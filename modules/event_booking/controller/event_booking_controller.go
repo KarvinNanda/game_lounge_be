@@ -128,9 +128,9 @@ func UpsertEventPrice(c *gin.Context) {
 
 // PreviewPrice menghitung estimasi harga event sebelum booking dibuat.
 func PreviewPrice(c *gin.Context) {
-	storeID := c.Query("store_id")
+	storeID   := c.Query("store_id")
 	startTime := c.Query("start_time")
-	endTime := c.Query("end_time")
+	endTime   := c.Query("end_time")
 	if storeID == "" || startTime == "" || endTime == "" {
 		utils.ResponseError(c, http.StatusBadRequest, "store_id, start_time, dan end_time wajib diisi")
 		return

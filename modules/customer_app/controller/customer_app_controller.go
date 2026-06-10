@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,6 +17,8 @@ import (
 	eventBookingDto     "game_lounge_be/modules/event_booking/dto"
 	eventBookingRepo    "game_lounge_be/modules/event_booking/repository"
 	eventBookingService "game_lounge_be/modules/event_booking/service"
+	pricingDto          "game_lounge_be/modules/pricing/dto"
+	pricingService      "game_lounge_be/modules/pricing/service"
 	"game_lounge_be/utils"
 
 	"github.com/gin-gonic/gin"
@@ -305,6 +308,42 @@ func PublicGetRoomTemplates(c *gin.Context) {
     }
 
     utils.ResponseSuccess(c, http.StatusOK, "OK", result)
+}
+
+// PublicGetRoomTemplateByID mengambil detail 1 room template (tanpa auth).
+// Digunakan di halaman detail ruangan customer web.
+func PublicGetRoomTemplateByID(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		utils.ResponseError(c, http.StatusBadRequest, "ID tidak valid")
+		return
+	}
+
+	var template models.RoomTemplate
+	if err := config.DB.
+		Preload("Facilities").
+		Where("id = ? AND is_active = true AND deleted_at IS NULL", id).
+		First(&template).Error; err != nil {
+		utils.ResponseError(c, http.StatusNotFound, "Ruangan tidak ditemukan")
+		return
+	}
+
+	// Hitung min_price global (paket 1 jam di semua store)
+	var minPrice float64
+	config.DB.Table("store_package_prices").
+		Where("room_template_id = ? AND duration_hours = 1 AND deleted_at IS NULL", id).
+		Select("MIN(price)").Scan(&minPrice)
+
+	utils.ResponseSuccess(c, http.StatusOK, "OK", gin.H{
+		"id":           template.ID,
+		"name":         template.Name,
+		"description":  template.Description,
+		"image_url":    template.ImageURL,
+		"capacity_min": template.CapacityMin,
+		"capacity_max": template.CapacityMax,
+		"facilities":   template.Facilities,
+		"min_price":    minPrice,
+	})
 }
 
 // ── Forgot / Reset Password ───────────────────────────────────────────────────
@@ -892,6 +931,8 @@ func InitiateEventBooking(c *gin.Context) {
 		StartTime:        req.StartTime,
 		EndTime:          req.EndTime,
 		Notes:            req.Notes,
+		DurationType:     "hourly",
+		BookingScope:     "full_venue",
 	}
 
 	eventBooking, err := eventBookingService.Create(createReq, customerID)
@@ -983,6 +1024,163 @@ func MockConfirmEventBooking(c *gin.Context) {
 		"end_time":     eb.EndTime,
 		"total_price":  eb.TotalPrice,
 	})
+}
+
+// GetBookingSlots mengambil semua slot per jam dalam jam operasional store
+// beserta ketersediaan (berapa unit tersisa) dan harga per slot.
+// Digunakan di customer booking page untuk tampilan multi-slot selection.
+func GetBookingSlots(c *gin.Context) {
+	storeID            := c.Query("store_id")
+	roomTemplateID, _  := strconv.Atoi(c.Query("room_template_id"))
+	date               := c.Query("date")
+
+	if storeID == "" || roomTemplateID == 0 || date == "" {
+		utils.ResponseError(c, http.StatusBadRequest,
+			"store_id, room_template_id, dan date wajib diisi")
+		return
+	}
+
+	// Ambil jam operasional berdasarkan hari (weekday/weekend)
+	bookingDate, _ := time.Parse("2006-01-02", date)
+	dayType := "weekday"
+	if bookingDate.Weekday() == time.Saturday || bookingDate.Weekday() == time.Sunday {
+		dayType = "weekend"
+	}
+
+	var opHour models.StoreOperatingHour
+	config.DB.Where(
+		"store_id = ? AND day_type = ? AND is_active = true AND deleted_at IS NULL",
+		storeID, dayType,
+	).First(&opHour)
+
+	openTime  := "10:00"
+	closeTime := "02:00"
+	if opHour.ID != 0 {
+		openTime  = opHour.OpenTime[:5]
+		closeTime = opHour.CloseTime[:5]
+	}
+
+	openMins  := parseTimeMins(openTime)
+	closeMins := parseTimeMins(closeTime)
+	if closeMins <= openMins {
+		closeMins += 24 * 60 // tangani jam yang melewati tengah malam
+	}
+
+	type SlotResult struct {
+		StartTime string  `json:"start_time"`
+		EndTime   string  `json:"end_time"`
+		Available bool    `json:"available"`
+		Price     float64 `json:"price"`
+	}
+
+	// Ambil semua room unit untuk store + room_template ini
+	var roomIDs []string
+	config.DB.Table("store_rooms").
+		Where("store_id = ? AND room_template_id = ? AND is_active = true AND deleted_at IS NULL",
+			storeID, roomTemplateID).
+		Pluck("id", &roomIDs)
+
+	// Ambil booking aktif pada store + tanggal
+	var bookings []models.Booking
+	if len(roomIDs) > 0 {
+		config.DB.Where(
+			"room_id IN ? AND booking_date = ? AND status NOT IN ('cancelled')",
+			roomIDs, date,
+		).Find(&bookings)
+	}
+
+	// Ambil hold yang masih aktif (belum expire)
+	var holds []models.BookingHold
+	if len(roomIDs) > 0 {
+		config.DB.Where(
+			"room_id IN ? AND booking_date = ? AND expires_at > NOW()",
+			roomIDs, date,
+		).Find(&holds)
+	}
+
+	totalRooms := len(roomIDs)
+	var slots []SlotResult
+
+	for startMins := openMins; startMins+60 <= closeMins; startMins += 60 {
+		endMins   := startMins + 60
+		slotStart := minsToTime(startMins)
+		slotEnd   := minsToTime(endMins)
+
+		// Hitung berapa unit yang terpakai di slot ini
+		usedCount := 0
+		for _, roomID := range roomIDs {
+			occupied := false
+
+			for _, b := range bookings {
+				if b.RoomID != roomID {
+					continue
+				}
+				bS := parseTimeMins(b.StartTime[:5])
+				bE := parseTimeMins(b.EndTime[:5])
+				if bE <= bS {
+					bE += 24 * 60
+				}
+				if startMins < bE && endMins > bS {
+					occupied = true
+					break
+				}
+			}
+
+			if !occupied {
+				for _, h := range holds {
+					if h.RoomID != roomID {
+						continue
+					}
+					hS := parseTimeMins(h.StartTime[:5])
+					hE := parseTimeMins(h.EndTime[:5])
+					if hE <= hS {
+						hE += 24 * 60
+					}
+					if startMins < hE && endMins > hS {
+						occupied = true
+						break
+					}
+				}
+			}
+
+			if occupied {
+				usedCount++
+			}
+		}
+
+		available := totalRooms > 0 && usedCount < totalRooms
+
+		// Hitung harga slot ini (1 jam) via pricing service
+		slotPrice := 0.0
+		if priceResult, err := pricingService.CalculatePrice(pricingDto.CalculatePriceRequest{
+			StoreID:        storeID,
+			RoomTemplateID: uint(roomTemplateID),
+			BookingDate:    date,
+			StartTime:      slotStart,
+			EndTime:        slotEnd,
+		}); err == nil {
+			slotPrice = priceResult.FinalPrice
+		}
+
+		slots = append(slots, SlotResult{
+			StartTime: slotStart,
+			EndTime:   slotEnd,
+			Available: available,
+			Price:     slotPrice,
+		})
+	}
+
+	utils.ResponseSuccess(c, http.StatusOK, "OK", gin.H{
+		"slots":           slots,
+		"operating_hours": gin.H{"open": openTime, "close": closeTime},
+		"total_rooms":     totalRooms,
+	})
+}
+
+// minsToTime mengkonversi jumlah menit dari tengah malam ke string "HH:MM".
+func minsToTime(m int) string {
+	m = m % (24 * 60)
+	return fmt.Sprintf("%02d:%02d", m/60, m%60)
 }
 
 // checkEventConflict mengecek apakah ada booking/event yang conflict dengan slot yang diminta.

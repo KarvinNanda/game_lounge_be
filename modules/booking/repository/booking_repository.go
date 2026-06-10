@@ -236,9 +236,9 @@ func FindSessionsEndingSoon(storeID string, withinMinutes int) ([]models.Booking
 
 // FindAvailableCreditsForBooking mengambil play credits customer yang aktif dan
 // berlaku di store yang dipilih, dengan sisa jam >= durationHours.
-func FindAvailableCreditsForBooking(customerID, storeID string, durationHours float64) ([]models.CustomerPlayCredit, error) {
+func FindAvailableCreditsForBooking(customerID, storeID, bookingDate string, durationHours float64) ([]models.CustomerPlayCredit, error) {
 	var credits []models.CustomerPlayCredit
-	now := time.Now()
+	// now := time.Now()
 
 	err := config.DB.Preload("Package.PackageStores.Store").
 		Joins("JOIN play_credits_packages p ON p.id = customer_play_credits.package_id").
@@ -254,7 +254,7 @@ func FindAvailableCreditsForBooking(customerID, storeID string, durationHours fl
 					WHERE pcps.package_id = p.id AND pcps.store_id = ?
 				)
 			)`,
-			customerID, now, durationHours, storeID).
+			customerID, bookingDate, durationHours, storeID).
 		Find(&credits).Error
 	return credits, err
 }
@@ -263,25 +263,25 @@ func FindAvailableCreditsForBooking(customerID, storeID string, durationHours fl
 
 // BatchUpdateStatus memperbarui status booking berdasarkan waktu Jakarta saat ini.
 // Dipanggil saat load dashboard untuk menjaga konsistensi DB.
-func BatchUpdateStatus(storeID, date string) error {
+func BatchUpdateStatus(storeID string) error {
 	now := time.Now().In(jakartaLoc())
 	nowTime := now.Format("15:04:05")
 
 	// upcoming → ongoing: booking_date = today AND start <= now AND end > now
 	config.DB.Model(&models.Booking{}).
-		Where("store_id = ? AND booking_date = ? AND status = 'upcoming' AND start_time <= ? AND end_time > ?",
-			storeID, date, nowTime, nowTime).
+		Where("store_id = ? AND booking_date = CURDATE() AND status = 'upcoming' AND start_time <= ? AND end_time > ?",
+			storeID, nowTime, nowTime).
 		Update("status", "ongoing")
 
 	// ongoing → completed: booking_date = today AND end <= now
 	config.DB.Model(&models.Booking{}).
-		Where("store_id = ? AND booking_date = ? AND status = 'ongoing' AND end_time <= ?",
-			storeID, date, nowTime).
+		Where("store_id = ? AND booking_date = CURDATE() AND status = 'ongoing' AND end_time <= ?",
+			storeID, nowTime).
 		Update("status", "completed")
 
 	// upcoming → completed: booking_date < today (terlewat)
 	config.DB.Model(&models.Booking{}).
-		Where("store_id = ? AND booking_date < ? AND status = 'upcoming'", storeID, date).
+		Where("store_id = ? AND booking_date < CURDATE() AND status = 'upcoming'", storeID).
 		Update("status", "completed")
 
 	return nil

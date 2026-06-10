@@ -385,7 +385,7 @@ type DashboardData struct {
 // GetDashboard mengambil data untuk render kalender grid.
 func GetDashboard(filter dto.DashboardFilter) (*DashboardData, error) {
 	// Update status terlebih dahulu
-	_ = repository.BatchUpdateStatus(filter.StoreID, filter.Date)
+	_ = repository.BatchUpdateStatus(filter.StoreID)
 
 	// Ambil jam operasional efektif (cek global holiday + store holiday)
 	openTime := "10:00:00"
@@ -462,8 +462,8 @@ func GetSessionsEndingSoon(storeID string) ([]BookingWithComputed, error) {
 }
 
 // GetAvailableCredits mengambil play credits yang tersedia untuk customer di store tertentu.
-func GetAvailableCredits(customerID, storeID string, durationHours float64) ([]models.CustomerPlayCredit, error) {
-	return repository.FindAvailableCreditsForBooking(customerID, storeID, durationHours)
+func GetAvailableCredits(customerID, storeID,bookingDate string, durationHours float64) ([]models.CustomerPlayCredit, error) {
+	return repository.FindAvailableCreditsForBooking(customerID, storeID,bookingDate, durationHours)
 }
 
 // ── Notification ──────────────────────────────────────────────────────────────

@@ -1,14 +1,16 @@
 package service
 
 import (
+	"encoding/json"
 	"errors"
-	"fmt"
 	"math"
 	"time"
 
+	"game_lounge_be/config"
 	"game_lounge_be/models"
 	"game_lounge_be/modules/event_booking/dto"
 	"game_lounge_be/modules/event_booking/repository"
+	storeRepository "game_lounge_be/modules/store/repository"
 
 	"github.com/google/uuid"
 )
@@ -99,39 +101,68 @@ func Create(req dto.CreateEventBookingRequest, createdBy string) (*models.EventB
 		return nil, errors.New("format booking_date tidak valid (YYYY-MM-DD)")
 	}
 
-	// Hitung durasi otomatis dari start/end time
-	startMins := parseMins(req.StartTime)
-	endMins := parseMins(req.EndTime)
+	// ── Hitung start/end time berdasarkan duration_type ───────────────
+	startTime := req.StartTime
+	endTime   := req.EndTime
+
+	if req.DurationType == "full_day" {
+		var opErr error
+		startTime, endTime, opErr = getStoreOperatingHours(req.StoreID, req.BookingDate)
+		if opErr != nil {
+			return nil, errors.New("gagal mengambil jam operasional store")
+		}
+	} else {
+		// hourly: start dan end wajib ada
+		if startTime == "" || endTime == "" {
+			return nil, errors.New("start_time dan end_time wajib diisi untuk booking per jam")
+		}
+	}
+
+	// Hitung durasi
+	startMins := parseMins(startTime)
+	endMins   := parseMins(endTime)
 	if endMins <= startMins {
 		endMins += 24 * 60
 	}
 	durationHours := float64(endMins-startMins) / 60.0
 
-	// Cek overlap dengan regular booking yang sudah ada di store
+	// ── Validasi overlap ──────────────────────────────────────────────
 	hasRegularOverlap, _ := repository.CheckOverlapWithRegular(
-		req.StoreID, req.BookingDate, req.StartTime, req.EndTime,
+		req.StoreID, req.BookingDate, startTime, endTime,
 	)
 	if hasRegularOverlap {
 		return nil, errors.New("ada booking reguler yang conflict pada jam tersebut. Batalkan booking reguler tersebut terlebih dahulu")
 	}
 
-	// Cek overlap dengan event booking lain
 	hasEventOverlap, _ := repository.CheckOverlapWithEvent(
-		req.StoreID, req.BookingDate, req.StartTime, req.EndTime, "",
+		req.StoreID, req.BookingDate, startTime, endTime, "",
 	)
 	if hasEventOverlap {
 		return nil, errors.New("sudah ada event booking lain pada jam tersebut")
 	}
 
-	// Ambil harga event store
+	// ── Harga ─────────────────────────────────────────────────────────
 	eventPrice, err := repository.GetEventPrice(req.StoreID)
 	if err != nil || eventPrice.PricePerDay == 0 {
 		return nil, errors.New("harga event untuk cabang ini belum dikonfigurasi. Silakan atur di menu Pricing")
 	}
 
-	totalPrice := calculateTotalPrice(eventPrice.PricePerDay, durationHours)
+	var totalPrice float64
+	if req.DurationType == "full_day" {
+		totalPrice = eventPrice.PricePerDay // full day = harga penuh
+	} else {
+		totalPrice = calculateTotalPrice(eventPrice.PricePerDay, durationHours)
+	}
 
-	var wa, email, notes *string
+	// ── Simpan selected_room_template_ids (per_room_type) ─────────────
+	var selectedRoomIDs *string
+	if req.BookingScope == "per_room_type" && len(req.SelectedRoomTemplateIDs) > 0 {
+		idsJSON, _ := json.Marshal(req.SelectedRoomTemplateIDs)
+		idsStr := string(idsJSON)
+		selectedRoomIDs = &idsStr
+	}
+
+	var wa, email, notes, desc *string
 	if req.CustomerWhatsapp != "" {
 		wa = &req.CustomerWhatsapp
 	}
@@ -141,23 +172,40 @@ func Create(req dto.CreateEventBookingRequest, createdBy string) (*models.EventB
 	if req.Notes != "" {
 		notes = &req.Notes
 	}
+	if req.Description != "" {
+		desc = &req.Description
+	}
+
+	// Default durationType/bookingScope jika kosong (misal panggilan internal)
+	durationType := req.DurationType
+	bookingScope := req.BookingScope
+	if durationType == "" {
+		durationType = "hourly"
+	}
+	if bookingScope == "" {
+		bookingScope = "full_venue"
+	}
 
 	booking := &models.EventBooking{
-		ID:               uuid.NewString(),
-		StoreID:          req.StoreID,
-		EventName:        req.EventName,
-		CustomerName:     req.CustomerName,
-		CustomerWhatsapp: wa,
-		CustomerEmail:    email,
-		BookingDate:      bookingDate,
-		StartTime:        req.StartTime,
-		EndTime:          req.EndTime,
-		DurationHours:    durationHours,
-		PricePerDay:      eventPrice.PricePerDay,
-		TotalPrice:       totalPrice,
-		Status:           "upcoming",
-		Notes:            notes,
-		CreatedBy:        &createdBy,
+		ID:                      uuid.NewString(),
+		StoreID:                 req.StoreID,
+		EventName:               req.EventName,
+		Description:             desc,
+		CustomerName:            req.CustomerName,
+		CustomerWhatsapp:        wa,
+		CustomerEmail:           email,
+		BookingDate:             bookingDate,
+		StartTime:               startTime,
+		EndTime:                 endTime,
+		DurationHours:           durationHours,
+		PricePerDay:             eventPrice.PricePerDay,
+		TotalPrice:              totalPrice,
+		Status:                  "upcoming",
+		DurationType:            durationType,
+		BookingScope:            bookingScope,
+		SelectedRoomTemplateIDs: selectedRoomIDs,
+		Notes:                   notes,
+		CreatedBy:               &createdBy,
 	}
 
 	if err := repository.Create(booking); err != nil {
@@ -165,6 +213,25 @@ func Create(req dto.CreateEventBookingRequest, createdBy string) (*models.EventB
 	}
 
 	return GetByID(booking.ID)
+}
+
+// getStoreOperatingHours mengambil jam buka-tutup store pada tanggal tertentu.
+// Fallback ke 10:00–02:00 jika data belum dikonfigurasi.
+func getStoreOperatingHours(storeID, date string) (openTime, closeTime string, err error) {
+	bookingDate, _ := time.Parse("2006-01-02", date)
+	dayType := "weekday"
+	if bookingDate.Weekday() == time.Saturday || bookingDate.Weekday() == time.Sunday {
+		dayType = "weekend"
+	}
+
+	var opHour models.StoreOperatingHour
+	if dbErr := config.DB.Where(
+		"store_id = ? AND day_type = ? AND is_active = true AND deleted_at IS NULL",
+		storeID, dayType,
+	).First(&opHour).Error; dbErr != nil {
+		return "10:00", "02:00", nil // default fallback
+	}
+	return opHour.OpenTime[:5], opHour.CloseTime[:5], nil
 }
 
 // Cancel membatalkan event booking dengan alasan wajib.
@@ -225,26 +292,54 @@ func UpsertEventPrice(storeID string, pricePerDay float64, updatedBy string) (*m
 	return repository.UpsertEventPrice(storeID, pricePerDay, updatedBy)
 }
 
-// PreviewPrice menghitung preview harga sebelum booking dibuat.
+// PreviewPrice menghitung preview harga event sebelum booking dibuat.
 func PreviewPrice(storeID, startTime, endTime string) (map[string]interface{}, error) {
 	startMins := parseMins(startTime)
-	endMins := parseMins(endTime)
+	endMins   := parseMins(endTime)
 	if endMins <= startMins {
 		endMins += 24 * 60
 	}
 	durationHours := float64(endMins-startMins) / 60.0
+	isFullDay := false
 
 	eventPrice, err := repository.GetEventPrice(storeID)
 	if err != nil || eventPrice.PricePerDay == 0 {
 		return nil, errors.New("harga event belum dikonfigurasi untuk cabang ini")
 	}
 
-	totalPrice := calculateTotalPrice(eventPrice.PricePerDay, durationHours)
+	// cek hari ni weekend or 
+	var dayCategory string
+	now := time.Now() // Pastikan timezone server sudah sesuai (misal WIB)
+	
+	switch now.Weekday() {
+	case time.Monday, time.Tuesday, time.Wednesday, time.Thursday:
+		dayCategory = "weekday"
+	case time.Friday, time.Saturday, time.Sunday:
+		dayCategory = "weekend"
+	}
+
+	// get data store sesuai store id & weekend/weekday nya
+	storeOperatingHours, err := storeRepository.FindOperatingHourByStoreAndDay(storeID, dayCategory)
+	if err != nil {
+		return nil, errors.New("gagal mengambil data store")
+	}
+
+	if storeOperatingHours.OpenTime == startTime && storeOperatingHours.CloseTime == endTime{
+		isFullDay = true
+	} else {
+		isFullDay = false
+	}
+
+	totalPrice := 0.0
+	if isFullDay {
+		totalPrice = eventPrice.PricePerDay
+	} else {
+		totalPrice = calculateTotalPrice(eventPrice.PricePerDay, durationHours)
+	}
 
 	return map[string]interface{}{
 		"price_per_day":  eventPrice.PricePerDay,
 		"duration_hours": durationHours,
 		"total_price":    totalPrice,
-		"formula":        fmt.Sprintf("Rp %.0f ÷ 24 × %.1f jam = Rp %.0f", eventPrice.PricePerDay, durationHours, totalPrice),
 	}, nil
 }

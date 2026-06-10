@@ -11,6 +11,7 @@ import (
 	customerCtrl "game_lounge_be/modules/customer/controller"
 	eventCtrl "game_lounge_be/modules/event_booking/controller"
 	facilityCtrl "game_lounge_be/modules/facility/controller"
+	fnbCtrl "game_lounge_be/modules/fnb/controller"
 	globalHolidayCtrl "game_lounge_be/modules/global_holiday/controller"
 	ntCtrl "game_lounge_be/modules/notification_template/controller"
 	playCreditsCtrl "game_lounge_be/modules/play_credits/controller"
@@ -229,6 +230,20 @@ func SetupRouter() *gin.Engine {
 		protected.PUT("banners/:id", bannerCtrl.Update)
 		protected.DELETE("banners/:id", bannerCtrl.Delete)
 		protected.PATCH("banners/:id/toggle", bannerCtrl.ToggleActive)
+
+		// ── FnB — Admin ───────────────────────────────────────────────
+		// Note: rute statis (sync-moka) didaftarkan SEBELUM /:id
+		// agar Gin tidak menganggapnya sebagai category/item ID.
+		protected.GET("fnb/categories",          fnbCtrl.AdminGetCategories)
+		protected.POST("fnb/categories",         fnbCtrl.AdminCreateCategory)
+		protected.PUT("fnb/categories/:id",      fnbCtrl.AdminUpdateCategory)
+		protected.DELETE("fnb/categories/:id",   fnbCtrl.AdminDeleteCategory)
+		protected.GET("fnb/items",               fnbCtrl.AdminGetItems)
+		protected.POST("fnb/items",              fnbCtrl.AdminCreateItem)
+		protected.PUT("fnb/items/:id",           fnbCtrl.AdminUpdateItem)
+		protected.GET("fnb/orders",              fnbCtrl.AdminGetOrders)
+		protected.PUT("fnb/orders/:id/status",   fnbCtrl.AdminUpdateOrderStatus)
+		protected.POST("fnb/sync-moka",          fnbCtrl.AdminSyncMoka)
 	}
 
 	// ── Customer auth (tidak perlu JWT) ──────────────────────────
@@ -272,6 +287,10 @@ func SetupRouter() *gin.Engine {
 		// Note: rute statis (initiate) didaftarkan SEBELUM /:event_id
 		customerProtected.POST("/event-bookings/initiate",                       customerAppCtrl.InitiateEventBooking)
 		customerProtected.POST("/event-bookings/:event_id/mock-confirm",         customerAppCtrl.MockConfirmEventBooking)
+
+		// ── FnB — Customer ────────────────────────────────────────────────────
+		customerProtected.POST("/fnb/orders",  fnbCtrl.CustomerCreateOrder)
+		customerProtected.GET("/fnb/orders",   fnbCtrl.CustomerGetMyOrders)
 	}
 
 	// ── Public (tanpa auth, untuk customer web) ───────────────────
@@ -282,9 +301,12 @@ func SetupRouter() *gin.Engine {
 		publicGroup.GET("/stores",                      customerAppCtrl.PublicGetStores)
 		publicGroup.GET("/stores/:id",                  customerAppCtrl.PublicGetStoreByID)
 		publicGroup.GET("/room-templates",              customerAppCtrl.PublicGetRoomTemplates)
+		publicGroup.GET("/room-templates/:id",          customerAppCtrl.PublicGetRoomTemplateByID)
 		publicGroup.GET("/booking/availability",          bookingCustomerCtrl.GetAvailability)
+		publicGroup.GET("/booking/slots",                 customerAppCtrl.GetBookingSlots)
 		publicGroup.GET("/play-credits/packages",         customerAppCtrl.PublicGetPlayCreditsPackages)
 		publicGroup.GET("/event-booking/availability",    customerAppCtrl.CheckEventAvailability)
+		publicGroup.GET("/fnb/menu",                      fnbCtrl.GetPublicMenu)
 	}
 
 	// ── Xendit Webhook (tanpa auth, verifikasi via x-callback-token) ──────────

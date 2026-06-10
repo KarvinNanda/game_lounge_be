@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"errors"
+	"fmt"
 	"time"
 
 	"game_lounge_be/config"
@@ -159,4 +161,71 @@ func DeductHours(creditID string, hours float64) error {
 	return config.DB.Model(&models.CustomerPlayCredit{}).
 		Where("id = ?", creditID).
 		Update("remaining_hours", config.DB.Raw("remaining_hours - ?", hours)).Error
+}
+
+// ValidateAndDeductPlayCredits memvalidasi play credits sebelum digunakan untuk booking.
+// Cek: credits masih aktif, belum expired pada tanggal booking, sisa jam cukup.
+// Menggunakan FIFO — kredit yang mau expired paling awal dipakai duluan.
+func ValidateAndDeductPlayCredits(customerID, bookingDate string, durationHours float64) (*models.CustomerPlayCredit, error) {
+	bookingDateParsed, err := time.Parse("2006-01-02", bookingDate)
+	if err != nil {
+		return nil, errors.New("format booking_date tidak valid")
+	}
+
+	// Cari play credits yang valid: aktif, belum expired pada tanggal booking, sisa jam cukup
+	var credit models.CustomerPlayCredit
+	dbErr := config.DB.
+		Where(`customer_id = ?
+            AND is_active = true
+            AND remaining_hours >= ?
+            AND expires_at >= ?
+            AND deleted_at IS NULL`,
+			customerID, durationHours, bookingDateParsed).
+		Order("expires_at ASC"). // FIFO — yang mau expired duluan dipakai lebih awal
+		First(&credit).Error
+
+	if dbErr != nil {
+		// Cek apakah ada credits tapi sudah expired
+		var expiredCount int64
+		config.DB.Model(&models.CustomerPlayCredit{}).
+			Where("customer_id = ? AND is_active = true AND expires_at < ? AND deleted_at IS NULL",
+				customerID, bookingDateParsed).
+			Count(&expiredCount)
+		if expiredCount > 0 {
+			return nil, fmt.Errorf(
+				"play credits kamu sudah expired untuk tanggal booking %s. Silakan beli paket credits baru",
+				bookingDateParsed.Format("02 January 2006"),
+			)
+		}
+
+		// Cek apakah ada credits aktif tapi jam tidak cukup
+		var insufficientCount int64
+		config.DB.Model(&models.CustomerPlayCredit{}).
+			Where(`customer_id = ? AND is_active = true
+                AND expires_at >= ? AND remaining_hours < ?
+                AND deleted_at IS NULL`,
+				customerID, bookingDateParsed, durationHours).
+			Count(&insufficientCount)
+		if insufficientCount > 0 {
+			return nil, fmt.Errorf(
+				"sisa jam play credits tidak cukup untuk booking %.0f jam",
+				durationHours,
+			)
+		}
+
+		return nil, errors.New("tidak ada play credits yang valid. Silakan beli paket credits terlebih dahulu")
+	}
+
+	// Deduct jam dari credits
+	newRemaining := credit.RemainingHours - durationHours
+	if err := config.DB.Model(&credit).Update("remaining_hours", newRemaining).Error; err != nil {
+		return nil, errors.New("gagal menggunakan play credits")
+	}
+
+	// Non-aktifkan jika jam sudah habis
+	if newRemaining <= 0 {
+		config.DB.Model(&credit).Update("is_active", false) //nolint:errcheck
+	}
+
+	return &credit, nil
 }

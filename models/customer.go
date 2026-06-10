@@ -26,4 +26,5 @@ type Customer struct {
 
 	// Relasi
 	FavoriteRoomTypes []CustomerFavoriteRoomType `gorm:"foreignKey:CustomerID" json:"favorite_room_types,omitempty"`
+	BookingHistory []Booking `gorm:"foreignKey:CustomerID" json:"booking_history,omitempty"`
 }

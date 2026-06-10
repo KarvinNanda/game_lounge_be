@@ -123,12 +123,13 @@ func GetSessionsEndingSoon(c *gin.Context) {
 func GetAvailableCredits(c *gin.Context) {
 	customerID := c.Query("customer_id")
 	storeID := c.Query("store_id")
-	if customerID == "" || storeID == "" {
-		utils.ResponseError(c, http.StatusBadRequest, "customer_id dan store_id wajib diisi")
+	bookingDate := c.Query("booking_date")
+	if customerID == "" || storeID == "" || bookingDate == "" {
+		utils.ResponseError(c, http.StatusBadRequest, "customer_id, store_id dan booking_date wajib diisi")
 		return
 	}
 	// Default durasi minimal 0.5 jam untuk filter credits yang tersedia
-	credits, err := service.GetAvailableCredits(customerID, storeID, 0.5)
+	credits, err := service.GetAvailableCredits(customerID, storeID, bookingDate, 0.5)
 	if err != nil {
 		utils.ResponseError(c, http.StatusInternalServerError, "Gagal mengambil data credits")
 		return
