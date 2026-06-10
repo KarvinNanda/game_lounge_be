@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod   # baca versi dari go.mod secara otomatis
+          cache: true               # cache $GOPATH/pkg/mod otomatis
+
+      - name: Verify dependencies
+        run: go mod verify
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test (unit only — integration test skip otomatis jika DB tidak ada)
+        run: go test -race -count=1 -timeout 120s ./...
+        # Catatan: test yang membutuhkan DB (integration) akan otomatis di-skip
+        # karena menggunakan pola skipIfNoDB(t) — tidak perlu set DB di CI.

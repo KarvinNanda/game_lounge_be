@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -20,14 +21,15 @@ import (
 )
 
 // InitiateBookingRequest adalah payload dari customer untuk membuat hold + invoice.
+// SelectedSlots berisi list jam mulai per-1-jam: ["10:00","11:00","14:00"]
+// Slot tidak harus berurutan — sistem hitung start dari slot pertama dan end dari slot terakhir+1jam.
 type InitiateBookingRequest struct {
-	StoreID        string  `json:"store_id" binding:"required"`
-	RoomTemplateID uint    `json:"room_template_id" binding:"required"`
-	BookingDate    string  `json:"booking_date" binding:"required"`
-	StartTime      string  `json:"start_time" binding:"required"`
-	DurationHours  float64 `json:"duration_hours" binding:"required,min=1,max=10"`
-	PaymentMethod  string  `json:"payment_method" binding:"required"`
-	VoucherID      string  `json:"voucher_id"` // opsional
+	StoreID        string   `json:"store_id" binding:"required"`
+	RoomTemplateID uint     `json:"room_template_id" binding:"required"`
+	BookingDate    string   `json:"booking_date" binding:"required"`
+	SelectedSlots  []string `json:"selected_slots" binding:"required,min=1"` // e.g. ["10:00","11:00"]
+	PaymentMethod  string   `json:"payment_method" binding:"required"`
+	VoucherID      string   `json:"voucher_id"` // opsional
 }
 
 // GetAvailability mengambil slot tersedia beserta harga yang dikalkulasi
@@ -88,22 +90,40 @@ func InitiateBooking(req InitiateBookingRequest, customerID string) (map[string]
 		return nil, errors.New("format tanggal tidak valid (gunakan YYYY-MM-DD)")
 	}
 
-	// 2. Hitung end time dari start time + durasi
-	startMins := parseMins(req.StartTime)
-	durMins   := int(req.DurationHours * 60)
-	endMins   := startMins + durMins
-	endTime   := minsToTime(endMins)
-
-	// 3. Hitung harga menggunakan pricing service yang proper
-	// (mempertimbangkan happy hour, flash sale, package pricing)
-	priceResult, err := getPriceForSlot(req.StoreID, req.RoomTemplateID,
-		req.BookingDate, req.StartTime, endTime)
-	if err != nil {
-		return nil, errors.New("gagal menghitung harga: " + err.Error())
+	// 2. Hitung start/end/duration dari selected_slots
+	if len(req.SelectedSlots) == 0 {
+		return nil, errors.New("pilih minimal 1 jam bermain")
 	}
-	totalPrice := priceResult.FinalPrice
+	sort.Strings(req.SelectedSlots)
+	startTime     := req.SelectedSlots[0]
+	lastSlot      := req.SelectedSlots[len(req.SelectedSlots)-1]
+	endMinsCalc   := timeToMins(lastSlot) + 60 // +1 jam dari slot terakhir
+	endTime       := minsToTime(endMinsCalc)
+	durationHours := float64(len(req.SelectedSlots))
 
-	// Aplikasikan voucher jika ada
+	// 3. Hitung total harga dari semua slot (masing-masing 1 jam)
+	// Lebih akurat karena setiap slot bisa punya harga berbeda (happy hour, flash sale)
+	totalPrice   := 0.0
+	hasFlashSale := false
+	for _, slot := range req.SelectedSlots {
+		slotEnd := minsToTime(timeToMins(slot) + 60)
+		priceResult, priceErr := pricingService.CalculatePrice(pricingDto.CalculatePriceRequest{
+			StoreID:        req.StoreID,
+			RoomTemplateID: req.RoomTemplateID,
+			BookingDate:    req.BookingDate,
+			StartTime:      slot,
+			EndTime:        slotEnd,
+		})
+		if priceErr != nil {
+			return nil, errors.New("gagal menghitung harga untuk slot " + slot)
+		}
+		totalPrice += priceResult.FinalPrice
+		if priceResult.HasFlashSale {
+			hasFlashSale = true
+		}
+	}
+
+	// 4. Aplikasikan voucher jika ada
 	discountAmount := 0.0
 	finalPrice     := totalPrice
 	if req.VoucherID != "" {
@@ -117,23 +137,23 @@ func InitiateBooking(req InitiateBookingRequest, customerID string) (map[string]
 	// Buat breakdown string untuk disimpan di hold
 	breakdownJSON := fmt.Sprintf(
 		`{"base":%.0f,"discount":%.0f,"final":%.0f,"voucher_id":"%s","has_flash_sale":%v}`,
-		totalPrice, discountAmount, finalPrice, req.VoucherID, priceResult.HasFlashSale,
+		totalPrice, discountAmount, finalPrice, req.VoucherID, hasFlashSale,
 	)
 
-	// 4. Ambil data customer
+	// 5. Ambil data customer
 	var customer models.Customer
 	config.DB.Where("id = ?", customerID).First(&customer)
 
-	// 5. Buat hold (atomic, pakai DB transaction untuk cegah race condition)
+	// 6. Buat hold (atomic, pakai DB transaction untuk cegah race condition)
 	hold := &models.BookingHold{
 		ID:             uuid.NewString(),
 		CustomerID:     customerID,
 		StoreID:        req.StoreID,
 		RoomTemplateID: req.RoomTemplateID,
 		BookingDate:    bookingDate,
-		StartTime:      req.StartTime,
+		StartTime:      startTime,
 		EndTime:        endTime,
-		DurationHours:  req.DurationHours,
+		DurationHours:  durationHours,
 		BasePrice:      totalPrice,   // harga sebelum diskon
 		TotalPrice:     finalPrice,   // harga setelah diskon
 		PriceBreakdown: breakdownJSON,
@@ -145,7 +165,7 @@ func InitiateBooking(req InitiateBookingRequest, customerID string) (map[string]
 		return nil, err
 	}
 
-	// 6. Buat Xendit invoice
+	// 7. Buat Xendit invoice
 	appURL     := os.Getenv("APP_URL")
 	externalID := fmt.Sprintf("BK-%s-%s", customerID[:8], createdHold.ID[:8])
 	payerEmail := ""
@@ -157,7 +177,7 @@ func InitiateBooking(req InitiateBookingRequest, customerID string) (map[string]
 		ExternalID:  externalID,
 		Amount:      finalPrice,
 		PayerEmail:  payerEmail,
-		Description: fmt.Sprintf("Booking %s — %s %s", createdHold.RoomID, req.BookingDate, req.StartTime),
+		Description: fmt.Sprintf("Booking %s — %s %s", createdHold.RoomID, req.BookingDate, startTime),
 		SuccessURL:  fmt.Sprintf("%s/payment/success?hold_id=%s", appURL, createdHold.ID),
 		FailureURL:  fmt.Sprintf("%s/payment/failed?hold_id=%s", appURL, createdHold.ID),
 	})
@@ -166,7 +186,7 @@ func InitiateBooking(req InitiateBookingRequest, customerID string) (map[string]
 		return nil, errors.New("gagal membuat invoice pembayaran")
 	}
 
-	// 7. Simpan invoice info ke hold
+	// 8. Simpan invoice info ke hold
 	createdHold.XenditInvoiceID  = &invoice.ID
 	createdHold.XenditInvoiceURL = &invoice.InvoiceURL
 	repository.UpdateHold(createdHold)
@@ -185,19 +205,17 @@ func InitiateBooking(req InitiateBookingRequest, customerID string) (map[string]
 		"base_price":      totalPrice,
 		"discount_amount": discountAmount,
 		"total_price":     finalPrice,
-		"price_breakdown": priceResult.Breakdown,
-		"has_flash_sale":  priceResult.HasFlashSale,
-		"flash_sale_name": priceResult.FlashSaleName,
+		"has_flash_sale":  hasFlashSale,
 		"booking_preview": map[string]interface{}{
 			"store_id":        req.StoreID,
 			"booking_date":    req.BookingDate,
-			"start_time":      req.StartTime,
+			"start_time":      startTime,
 			"end_time":        endTime,
-			"duration_hours":  req.DurationHours,
+			"duration_hours":  durationHours,
+			"selected_slots":  req.SelectedSlots,
 			"base_price":      totalPrice,
 			"discount_amount": discountAmount,
 			"total_price":     finalPrice,
-			"price_breakdown": priceResult.Breakdown,
 		},
 	}, nil
 }
@@ -306,7 +324,7 @@ func getPriceForSlot(storeID string, roomTemplateID uint, date, startTime, endTi
 	})
 }
 
-func parseMins(t string) int {
+func timeToMins(t string) int {
 	if len(t) < 5 {
 		return 0
 	}

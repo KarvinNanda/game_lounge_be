@@ -78,6 +78,12 @@ func FindOperatingHoursByStore(storeID string) ([]models.StoreOperatingHour, err
 	return hours, err
 }
 
+func FindOperatingHourByStoreAndDay(storeID string, day string) (*models.StoreOperatingHour, error) {
+	var hours models.StoreOperatingHour
+	err := config.DB.Where("store_id = ? AND day_type = ? AND is_active = 1 AND deleted_at IS NULL", storeID, day).First(&hours).Error
+	return &hours, err
+}
+
 // Holiday Schedules
 func UpsertHolidaySchedules(storeID string, holidays []models.StoreHolidaySchedule) error {
 	tx := config.DB.Begin()

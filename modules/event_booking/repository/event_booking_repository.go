@@ -182,7 +182,7 @@ func UpsertEventPrice(storeID string, pricePerDay float64, updatedBy string) (*m
 	} else {
 		// Sudah ada → update
 		price.PricePerDay = pricePerDay
-		price.UpdatedBy = &updatedBy
+		price.UpdatedBy   = &updatedBy
 		err = config.DB.Save(&price).Error
 	}
 	return &price, err

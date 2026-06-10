@@ -44,6 +44,8 @@ func FindCustomerByID(id string) (*models.Customer, error) {
 	err := config.DB.
 		Preload("FavoriteRoomTypes").
 		Preload("FavoriteRoomTypes.RoomTemplate").
+		Preload("BookingHistory").
+		Preload("BookingHistory.Room").
 		Where("id = ? AND deleted_at IS NULL", id).
 		First(&customer).Error
 	if err != nil {

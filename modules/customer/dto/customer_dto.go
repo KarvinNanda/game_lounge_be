@@ -21,7 +21,7 @@ type CreateCustomerRequest struct {
 	Occupation       string `json:"occupation"`
 	Type             string `json:"type"`              // member | regular (default: regular)
 	Notes            string `json:"notes"`
-	FavoriteRoomTypes []uint `json:"favorite_room_types"` // []room_template_id
+	FavoriteRoomTypes []uint `json:"favorite_room_ids"` // []room_template_id
 }
 
 // ── Update ────────────────────────────────────────────────────────────────────
@@ -36,7 +36,7 @@ type UpdateCustomerRequest struct {
 	Type             string `json:"type"`
 	Status           string `json:"status"` // active | inactive
 	Notes            string `json:"notes"`
-	FavoriteRoomTypes []uint `json:"favorite_room_types"`
+	FavoriteRoomTypes []uint `json:"favorite_room_ids"`
 }
 
 // ── Update Notes ──────────────────────────────────────────────────────────────

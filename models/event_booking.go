@@ -10,6 +10,7 @@ type EventBooking struct {
 	ID               string     `gorm:"type:char(36);primaryKey" json:"id"`
 	StoreID          string     `gorm:"type:char(36);not null;index" json:"store_id"`
 	EventName        string     `gorm:"size:150;not null" json:"event_name"`
+	Description      *string    `gorm:"type:text" json:"description"` // deskripsi event (tampil ke customer)
 	CustomerName     string     `gorm:"size:150;not null" json:"customer_name"`
 	CustomerWhatsapp *string    `gorm:"size:20" json:"customer_whatsapp"`
 	CustomerEmail    *string    `gorm:"size:150" json:"customer_email"`
@@ -20,6 +21,12 @@ type EventBooking struct {
 	PricePerDay      float64    `gorm:"type:decimal(12,2);not null" json:"price_per_day"`
 	TotalPrice       float64    `gorm:"type:decimal(12,2);not null" json:"total_price"`
 	Status           string     `gorm:"type:enum('upcoming','ongoing','completed','cancelled');default:'upcoming'" json:"status"`
+
+	// Opsi durasi dan scope ruangan (admin create event booking)
+	DurationType            string  `gorm:"type:enum('hourly','full_day');default:'hourly'" json:"duration_type"`
+	BookingScope            string  `gorm:"type:enum('full_venue','per_room_type');default:'full_venue'" json:"booking_scope"`
+	SelectedRoomTemplateIDs *string `gorm:"type:text" json:"selected_room_template_ids"` // JSON "[1,2,3]" atau NULL
+
 	CancelReason     *string    `gorm:"type:text" json:"cancel_reason"`
 	CancelledAt      *time.Time `json:"cancelled_at"`
 	CancelledBy      *string    `gorm:"size:255" json:"cancelled_by"`
