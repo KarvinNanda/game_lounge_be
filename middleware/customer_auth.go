@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"net/http"
-	"strings"
 
 	"game_lounge_be/utils"
 
@@ -10,25 +9,33 @@ import (
 )
 
 // CustomerAuth middleware untuk endpoint yang butuh customer JWT.
+// Token dibaca dari httpOnly cookie (cookie-only, bukan Authorization header).
 // Set "customer_id" dan "customer_type" ke context.
 func CustomerAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
+		if !csrfOriginAllowed(c) {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"success": false,
+				"message": "Origin tidak diizinkan",
+			})
+			return
+		}
+
+		token, err := c.Cookie(utils.CustomerCookieName)
+		if err != nil || token == "" {
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"success": false,
-				"message": "Token tidak ditemukan",
+				"message": "Autentikasi diperlukan",
 			})
 			c.Abort()
 			return
 		}
 
-		tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
-		claims, err := utils.ValidateCustomerJWT(tokenStr)
+		claims, err := utils.ValidateCustomerJWT(token)
 		if err != nil {
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"success": false,
-				"message": "Token tidak valid atau sudah kadaluwarsa",
+				"message": "Sesi tidak valid atau sudah berakhir",
 			})
 			c.Abort()
 			return

@@ -24,12 +24,41 @@ import (
 	uploadCtrl "game_lounge_be/modules/upload/controller"
 	voucherCtrl "game_lounge_be/modules/voucher/controller"
 
+	"os"
+	"strings"
+	"time"
+
 	"github.com/gin-gonic/gin"
 )
 
 func SetupRouter() *gin.Engine {
 	r := gin.Default()
+
+	// ── Trusted proxies ───────────────────────────────────────
+	// Default: tidak percaya proxy manapun → ClientIP() tidak bisa dispoof
+	// via X-Forwarded-For. Jika di belakang reverse proxy (Coolify/nginx),
+	// set TRUSTED_PROXIES="10.0.0.0/8" (comma-separated CIDR/IP).
+	if tp := os.Getenv("TRUSTED_PROXIES"); tp != "" {
+		r.SetTrustedProxies(strings.Split(tp, ","))
+	} else {
+		r.SetTrustedProxies(nil)
+	}
+
+	// Batas memori parsing multipart (file upload)
+	r.MaxMultipartMemory = 8 << 20 // 8 MB
+
+	r.Use(middleware.SecurityHeaders())
 	r.Use(middleware.CORSMiddleware())
+	r.Use(middleware.MaxBodySize(10 << 20)) // 10 MB max request body
+
+	// Rate limiter untuk endpoint sensitif (login, forgot password):
+	// max 10 request per menit per IP per endpoint.
+	authLimiter := middleware.RateLimit(10, time.Minute)
+
+	// ── Health check ──────────────────────────────────────────
+	r.GET("/health", func(c *gin.Context) {
+		c.JSON(200, gin.H{"status": "ok"})
+	})
 
 	// ── Static file serving ───────────────────────────────────
 	r.Static("/assets/img", "./assets/img") // primary asset dir (used by /upload)
@@ -37,22 +66,29 @@ func SetupRouter() *gin.Engine {
 
 	api := r.Group("/api")
 
-	// ── Public endpoints (no auth) ────────────────────────────
-	api.POST("/auth/login", authCtrl.Login)
-	api.POST("/upload", uploadCtrl.Upload) // file upload, returns path
+	// ── Admin app ─────────────────────────────────────────────
+	// SEMUA rute yang dipakai admin FE hidup di bawah /api/admin.
+	// Ini memungkinkan cookie staff_token di-scope ke Path=/api/admin
+	// sehingga tidak pernah terkirim ke rute customer (/api/customer/*).
+	// Admin FE cukup mengganti baseURL: /api → /api/admin.
+	api.POST("/admin/auth/login", authLimiter, authCtrl.Login)
 
 	// ── Admin Recovery (forgot password super admin) ──────────
-	api.POST("/admin-recovery/request",          recoveryCtrl.Request)
-	api.GET("/admin-recovery/:token/validate",    recoveryCtrl.Validate)
-	api.POST("/admin-recovery/:token/reset",      recoveryCtrl.Reset)
+	api.POST("/admin/admin-recovery/request",          authLimiter, recoveryCtrl.Request)
+	api.GET("/admin/admin-recovery/:token/validate",    recoveryCtrl.Validate)
+	api.POST("/admin/admin-recovery/:token/reset",      authLimiter, recoveryCtrl.Reset)
 
-	// ── Protected endpoints ───────────────────────────────────
-	protected := api.Group("/")
+	// ── Protected endpoints (staff JWT via cookie) ────────────
+	protected := api.Group("/admin")
 	protected.Use(middleware.AuthMiddleware())
 	{
 		// Auth
 		protected.GET("auth/me", authCtrl.Me)
 		protected.POST("auth/logout", authCtrl.Logout)
+
+		// Upload butuh staff JWT — endpoint upload publik berisiko
+		// disalahgunakan (disk filling, hosting konten berbahaya).
+		protected.POST("upload", uploadCtrl.Upload)
 
 		// Roles
 		protected.GET("roles", roleCtrl.GetAll)
@@ -249,10 +285,10 @@ func SetupRouter() *gin.Engine {
 	// ── Customer auth (tidak perlu JWT) ──────────────────────────
 	customerAuth := api.Group("/customer")
 	{
-		customerAuth.POST("/login",                          customerAppCtrl.Login)
-		customerAuth.POST("/forgot-password",                customerAppCtrl.ForgotPassword)
+		customerAuth.POST("/login",                          authLimiter, customerAppCtrl.Login)
+		customerAuth.POST("/forgot-password",                authLimiter, customerAppCtrl.ForgotPassword)
 		customerAuth.GET("/reset-password/:token/validate",  customerAppCtrl.ValidateResetToken)
-		customerAuth.POST("/reset-password/:token",          customerAppCtrl.ResetPassword)
+		customerAuth.POST("/reset-password/:token",          authLimiter, customerAppCtrl.ResetPassword)
 	}
 
 	// ── Customer protected (perlu customer JWT) ───────────────────

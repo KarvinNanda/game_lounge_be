@@ -9,6 +9,17 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+// jwtSecret mengembalikan secret key JWT dari environment.
+// Secret kosong DITOLAK — token yang ditandatangani dengan secret kosong
+// dapat dipalsukan dengan mudah oleh penyerang.
+func jwtSecret() ([]byte, error) {
+	s := os.Getenv("JWT_SECRET")
+	if s == "" {
+		return nil, errors.New("JWT_SECRET belum dikonfigurasi")
+	}
+	return []byte(s), nil
+}
+
 type JWTClaims struct {
 	StaffID     string   `json:"staff_id"`
 	Username    string   `json:"username"`
@@ -19,7 +30,10 @@ type JWTClaims struct {
 }
 
 func GenerateJWT(staffID, username string, roleID uint, isSystem bool, permissions []string) (string, error) {
-	secret := os.Getenv("JWT_SECRET")
+	secret, err := jwtSecret()
+	if err != nil {
+		return "", err
+	}
 	expiredHours, _ := strconv.Atoi(os.Getenv("JWT_EXPIRED_HOURS"))
 	if expiredHours == 0 {
 		expiredHours = 24
@@ -38,17 +52,20 @@ func GenerateJWT(staffID, username string, roleID uint, isSystem bool, permissio
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString([]byte(secret))
+	return token.SignedString(secret)
 }
 
 func ValidateJWT(tokenString string) (*JWTClaims, error) {
-	secret := os.Getenv("JWT_SECRET")
+	secret, err := jwtSecret()
+	if err != nil {
+		return nil, err
+	}
 
 	token, err := jwt.ParseWithClaims(tokenString, &JWTClaims{}, func(t *jwt.Token) (interface{}, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, errors.New("unexpected signing method")
 		}
-		return []byte(secret), nil
+		return secret, nil
 	})
 
 	if err != nil {
@@ -75,6 +92,10 @@ type CustomerJWTClaims struct {
 
 // GenerateCustomerJWT membuat token JWT untuk customer (expire 7 hari).
 func GenerateCustomerJWT(customerID, customerType string) (string, error) {
+	secret, err := jwtSecret()
+	if err != nil {
+		return "", err
+	}
 	claims := CustomerJWTClaims{
 		CustomerID:   customerID,
 		CustomerType: customerType,
@@ -84,17 +105,21 @@ func GenerateCustomerJWT(customerID, customerType string) (string, error) {
 		},
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString([]byte(os.Getenv("JWT_SECRET")))
+	return token.SignedString(secret)
 }
 
 // ValidateCustomerJWT memvalidasi token customer.
 // Return error jika bukan customer token (cek field customer_id).
 func ValidateCustomerJWT(tokenStr string) (*CustomerJWTClaims, error) {
+	secret, err := jwtSecret()
+	if err != nil {
+		return nil, err
+	}
 	token, err := jwt.ParseWithClaims(tokenStr, &CustomerJWTClaims{}, func(t *jwt.Token) (interface{}, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, errors.New("unexpected signing method")
 		}
-		return []byte(os.Getenv("JWT_SECRET")), nil
+		return secret, nil
 	})
 	if err != nil {
 		return nil, err
