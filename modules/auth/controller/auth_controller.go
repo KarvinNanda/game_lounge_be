@@ -2,6 +2,7 @@ package controller
 
 import (
 	"net/http"
+
 	"game_lounge_be/modules/auth/dto"
 	"game_lounge_be/modules/auth/repository"
 	"game_lounge_be/modules/auth/service"
@@ -10,6 +11,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// Login memvalidasi kredensial staff lalu memasang httpOnly cookie.
+// Token TIDAK dikirim di response body — JavaScript tidak boleh menyentuh token
+// (mitigasi pencurian token via XSS).
 func Login(c *gin.Context) {
 	var req dto.LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -23,7 +27,10 @@ func Login(c *gin.Context) {
 		return
 	}
 
-	utils.ResponseSuccess(c, http.StatusOK, "Login berhasil", resp)
+	utils.SetAuthCookie(c, utils.StaffCookieName, resp.Token, utils.StaffTokenMaxAge(), utils.StaffCookiePath)
+	utils.ResponseSuccess(c, http.StatusOK, "Login berhasil", gin.H{
+		"staff": resp.Staff,
+	})
 }
 
 func Me(c *gin.Context) {
@@ -36,6 +43,8 @@ func Me(c *gin.Context) {
 	utils.ResponseSuccess(c, http.StatusOK, "OK", staff)
 }
 
+// Logout menghapus httpOnly cookie di browser.
 func Logout(c *gin.Context) {
+	utils.ClearAuthCookie(c, utils.StaffCookieName, utils.StaffCookiePath)
 	utils.ResponseSuccess(c, http.StatusOK, "Logout berhasil", nil)
 }

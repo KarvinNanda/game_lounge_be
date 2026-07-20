@@ -57,8 +57,10 @@ func Login(c *gin.Context) {
 		return
 	}
 
+	// Token dikirim via httpOnly cookie, TIDAK di response body —
+	// JavaScript tidak boleh menyentuh token (mitigasi XSS).
+	utils.SetAuthCookie(c, utils.CustomerCookieName, token, utils.CustomerTokenMaxAge(), utils.CustomerCookiePath)
 	utils.ResponseSuccess(c, http.StatusOK, "Login berhasil", gin.H{
-		"token":    token,
 		"customer": customer,
 	})
 }
@@ -142,9 +144,9 @@ func PublicGetStoreByID(c *gin.Context) {
 
 // ── Logout ───────────────────────────────────────────────────────────────────
 
-// Logout cukup return 200 — token di-clear dari sisi frontend.
-// JWT bersifat stateless sehingga tidak perlu invalidasi di server.
+// Logout menghapus httpOnly cookie customer di browser.
 func Logout(c *gin.Context) {
+	utils.ClearAuthCookie(c, utils.CustomerCookieName, utils.CustomerCookiePath)
 	utils.ResponseSuccess(c, http.StatusOK, "Logout berhasil", nil)
 }
 

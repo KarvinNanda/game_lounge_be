@@ -2,6 +2,7 @@ package utils
 
 import (
 	"bytes"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -60,10 +61,15 @@ func CreateXenditInvoice(req XenditInvoiceRequest) (*XenditInvoiceResponse, erro
 }
 
 // VerifyXenditWebhook memvalidasi X-CALLBACK-TOKEN dari Xendit.
+// Menggunakan constant-time compare untuk mencegah timing attack.
+// Verifikasi hanya di-skip pada mock mode penuh (kedua env Xendit kosong).
 func VerifyXenditWebhook(token string) bool {
 	expected := os.Getenv("XENDIT_WEBHOOK_TOKEN")
 	if expected == "" {
-		return true // mock mode: skip verification
+		// Mock mode hanya jika Xendit memang belum dikonfigurasi sama sekali.
+		// Jika secret key ada tapi webhook token lupa diset → TOLAK semua webhook
+		// (fail-closed), jangan malah terbuka.
+		return os.Getenv("XENDIT_SECRET_KEY") == ""
 	}
-	return token == expected
+	return subtle.ConstantTimeCompare([]byte(token), []byte(expected)) == 1
 }

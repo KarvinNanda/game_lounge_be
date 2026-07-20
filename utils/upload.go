@@ -1,9 +1,11 @@
 package utils
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -52,6 +54,67 @@ var allowedExtensions = map[string]bool{
 
 const maxFileSize = 2 * 1024 * 1024 // 2 MB
 
+// sniffMimeByExt memetakan ekstensi ke prefix MIME hasil sniffing yang diizinkan.
+// File yang isinya tidak cocok dengan ekstensinya DITOLAK — mencegah file HTML/
+// script menyamar sebagai gambar (stored XSS / drive-by download).
+var sniffMimeByExt = map[string][]string{
+	".jpg":  {"image/jpeg"},
+	".jpeg": {"image/jpeg"},
+	".png":  {"image/png"},
+	".webp": {"image/webp"},
+	// SVG terdeteksi sebagai text/xml atau text/plain oleh DetectContentType
+	".svg": {"image/svg+xml", "text/xml", "text/plain"},
+}
+
+// svgForbidden berisi pola berbahaya yang tidak boleh ada di file SVG.
+// SVG adalah XML yang bisa memuat JavaScript — vektor stored XSS klasik.
+var svgForbidden = []string{"<script", "javascript:", "onload=", "onerror=", "onclick=", "<foreignobject", "<iframe", "<embed", "href=\"data:text/html"}
+
+// validateFileContent membaca isi file dan memastikan cocok dengan ekstensinya.
+// Mengembalikan byte yang sudah terbaca agar bisa ditulis ulang oleh caller.
+func validateFileContent(src io.Reader, ext string) ([]byte, error) {
+	head := make([]byte, 512)
+	n, err := io.ReadFull(src, head)
+	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
+		return nil, fmt.Errorf("gagal membaca file: %w", err)
+	}
+	head = head[:n]
+
+	detected := http.DetectContentType(head)
+	allowed := false
+	for _, prefix := range sniffMimeByExt[ext] {
+		if strings.HasPrefix(detected, prefix) {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return nil, fmt.Errorf("isi file tidak sesuai dengan tipe %s", ext)
+	}
+
+	// Inspeksi ekstra untuk SVG: baca seluruh isi (max 2MB, sudah dicek size)
+	// dan tolak jika mengandung script/event handler.
+	if ext == ".svg" {
+		rest, err := io.ReadAll(io.LimitReader(src, maxFileSize))
+		if err != nil {
+			return nil, fmt.Errorf("gagal membaca file: %w", err)
+		}
+		full := append(head, rest...)
+		lower := strings.ToLower(string(full))
+		if !strings.Contains(lower, "<svg") {
+			return nil, fmt.Errorf("file SVG tidak valid")
+		}
+		for _, bad := range svgForbidden {
+			if strings.Contains(lower, bad) {
+				return nil, fmt.Errorf("file SVG mengandung konten yang tidak diizinkan")
+			}
+		}
+		return full, nil
+	}
+
+	return head, nil
+}
+
 // SaveFileToAssets saves an uploaded file to ./assets/img/{folder}/ and
 // returns the public path  /assets/img/{folder}/{filename}.{ext}
 func SaveFileToAssets(file *multipart.FileHeader, folder string) (string, error) {
@@ -89,6 +152,12 @@ func SaveFileToAssets(file *multipart.FileHeader, folder string) (string, error)
 	}
 	defer src.Close()
 
+	// ── Validate actual content matches extension ────────────
+	head, err := validateFileContent(src, ext)
+	if err != nil {
+		return "", err
+	}
+
 	// ── Write to disk ─────────────────────────────────────────
 	dst, err := os.Create(savePath)
 	if err != nil {
@@ -96,7 +165,7 @@ func SaveFileToAssets(file *multipart.FileHeader, folder string) (string, error)
 	}
 	defer dst.Close()
 
-	if _, err := io.Copy(dst, src); err != nil {
+	if _, err := io.Copy(dst, io.MultiReader(bytes.NewReader(head), src)); err != nil {
 		os.Remove(savePath) // clean up on write failure
 		return "", fmt.Errorf("gagal menulis file: %w", err)
 	}
@@ -133,6 +202,12 @@ func SaveUploadedFile(file *multipart.FileHeader, folder string) (string, error)
 		return "", fmt.Errorf("ukuran file melebihi 2MB")
 	}
 
+	// Sanitasi folder untuk mencegah path traversal (../../etc)
+	folder = sanitizeFolder(folder)
+	if folder == "" {
+		folder = "img"
+	}
+
 	filename := uuid.NewString() + ext
 	savePath := fmt.Sprintf("%s/%s/%s", UploadDir, folder, filename)
 
@@ -142,13 +217,18 @@ func SaveUploadedFile(file *multipart.FileHeader, folder string) (string, error)
 	}
 	defer src.Close()
 
+	head, err := validateFileContent(src, ext)
+	if err != nil {
+		return "", err
+	}
+
 	dst, err := os.Create(savePath)
 	if err != nil {
 		return "", err
 	}
 	defer dst.Close()
 
-	if _, err := io.Copy(dst, src); err != nil {
+	if _, err := io.Copy(dst, io.MultiReader(bytes.NewReader(head), src)); err != nil {
 		os.Remove(savePath)
 		return "", err
 	}
@@ -157,9 +237,18 @@ func SaveUploadedFile(file *multipart.FileHeader, folder string) (string, error)
 }
 
 // DeleteFile removes a file given its public URL path (e.g. /assets/img/stores/x.jpg)
+// Hanya file di dalam /assets/ atau /uploads/ yang boleh dihapus — path dengan
+// ".." atau di luar direktori tersebut ditolak (mencegah path traversal).
 func DeleteFile(urlPath string) {
 	if urlPath == "" {
 		return
 	}
-	os.Remove("." + urlPath)
+	if strings.Contains(urlPath, "..") {
+		return
+	}
+	cleaned := filepath.ToSlash(filepath.Clean("/" + urlPath))
+	if !strings.HasPrefix(cleaned, "/assets/") && !strings.HasPrefix(cleaned, "/uploads/") {
+		return
+	}
+	os.Remove("." + cleaned)
 }
