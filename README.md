@@ -281,21 +281,27 @@ game_lounge_be/
 
 ## API Endpoints
 
-Base URL: `/api`
+| Base URL | Dipakai oleh | Auth |
+|----------|--------------|------|
+| `/api/admin` | Admin FE (staff) | Cookie `staff_token` (Path=`/api/admin`) |
+| `/api/customer` | Customer web | Cookie `customer_token` (Path=`/api/customer`) |
+| `/api/public` | Customer web | Tanpa auth |
+| `/webhook/xendit` | Xendit | Header `x-callback-token` |
 
-### 🔓 Public (tanpa auth)
+Tabel staff di bawah ditulis relatif terhadap `/api/admin` (contoh: `/stores` = `/api/admin/stores`).
+
+### 🔓 Staff — tanpa auth
 
 | Method | Endpoint | Keterangan |
 |--------|----------|------------|
-| POST | `/auth/login` | Login, mendapat JWT token |
-| POST | `/upload` | Upload file gambar |
+| POST | `/auth/login` | Login, server set cookie `staff_token` |
 | POST | `/admin-recovery/request` | Kirim link reset password ke email super admin |
 | GET | `/admin-recovery/:token/validate` | Validasi token sebelum form reset ditampilkan |
 | POST | `/admin-recovery/:token/reset` | Reset password super admin dengan token yang valid |
 
 > **Admin Recovery** — response `/request` selalu sama (200 OK) agar penyerang tidak tahu apakah email terdaftar. Rate limit: maks 3 request/jam per IP. Token berlaku 15 menit dan hanya bisa dipakai 1 kali.
 
-**Upload** — `multipart/form-data`:
+**Upload** (`POST /upload`, butuh staff login) — `multipart/form-data`:
 - `file` *(required)* — file gambar (jpg, png, webp, svg, maks 2MB)
 - `folder` *(optional)* — subfolder tujuan, misal `stores`, `facilities` (default: `img`)
 
@@ -306,7 +312,7 @@ Response:
 
 ---
 
-### 🔒 Protected (Bearer JWT)
+### 🔒 Staff — protected (cookie `staff_token`)
 
 #### Auth
 | Method | Endpoint | Keterangan |
@@ -510,7 +516,7 @@ Priority: **Global Holiday** → **Store Holiday** → **Regular Hours** (weekda
 | GET | `/event-bookings` | List event booking (filter: store_id, status, date_from, date_to) |
 | POST | `/event-bookings` | Buat event booking baru |
 | GET | `/event-bookings/dashboard` | Event booking aktif untuk grid kalender (query: `store_id`, `date`) |
-| GET | `/event-bookings/preview-price` | Preview estimasi harga (query: `store_id`, `start_time`, `end_time`) |
+| GET | `/event-bookings/preview-price` | Preview estimasi harga untuk admin (query: `store_id`, `start_time`, `end_time`). Customer web memakai `/api/public/event-booking/quote` |
 | GET | `/event-bookings/:id` | Detail event booking |
 | PATCH | `/event-bookings/:id/cancel` | Batalkan event booking |
 
@@ -533,6 +539,7 @@ Priority: **Global Holiday** → **Store Holiday** → **Regular Hours** (weekda
 > - `total_price` dihitung: `round((price_per_day ÷ 24 × duration_hours) / 1000) × 1000` (dibulatkan ke Rp 1.000 terdekat).
 > - Harga event per store dikonfigurasi via `PUT /stores/:id/event-price`.
 > - Event booking **memblokir seluruh store** — regular booking yang waktunya overlap akan ditolak secara otomatis.
+> - Overlap dihitung dengan waktu absolut per hari operasional: jam sebelum jam buka store dianggap setelah tengah malam. Contoh (store 10:00–02:00): booking 00:00–01:00 pada `booking_date` yang sama bentrok dengan event 20:00–02:00.
 > - Jika ada regular booking yang sudah terlanjur ada di jam tersebut, create event booking akan gagal dengan pesan error.
 
 #### Notification Templates
@@ -565,6 +572,85 @@ Priority: **Global Holiday** → **Store Holiday** → **Regular Hours** (weekda
 | `type` | `all` \| `booking` \| `play_credits` | `all` (khusus `/transactions`) |
 | `page` | integer | `1` (khusus `/transactions`) |
 | `per_page` | integer | `20` (khusus `/transactions`) |
+
+---
+
+### 🌐 Public — customer web (`/api/public`, tanpa auth)
+
+| Method | Endpoint | Keterangan |
+|--------|----------|------------|
+| GET | `/banners` | Banner aktif, urut `sort_order` |
+| GET | `/banners/:id` | Detail banner aktif (banner nonaktif → 404) |
+| GET | `/stores` | List store |
+| GET | `/stores/:id` | Detail store |
+| GET | `/room-templates` | Room template aktif + `min_price` (query opsional: `store_id`) |
+| GET | `/room-templates/:id` | Detail room template + `facilities` aktif + `min_price` |
+| GET | `/booking/availability` | Slot tersedia (query: `store_id`, `room_template_id`, `date`, `duration_hours`) |
+| GET | `/booking/slots` | Slot per jam + sisa unit + harga |
+| GET | `/booking/quote` | Harga final slot terpilih tanpa membuat hold (query: `store_id`, `room_template_id`, `booking_date`, `selected_slots[]`) |
+| GET | `/play-credits/packages` | Paket play credits |
+| GET | `/event-booking/availability` | Jam yang sudah terisi + `event_price` (query: `store_id`, `date`, opsional `start_time`, `end_time`) |
+| GET | `/event-booking/quote` | Harga event customer (query: `store_id`, `booking_date`, `start_time`, `end_time`) |
+| GET | `/fnb/menu` | Menu FnB |
+
+> - Response banner dan room template memakai whitelist field. Kolom audit (`created_by`, `updated_by`, `deleted_by`, `deleted_at`) dan `is_active` tidak dikirim, karena `created_by`/`updated_by` berisi username staff.
+> - `/event-booking/quote` → `{store_id, booking_date, start_time, end_time, duration_hours, price_per_day, total_price, available}`. `total_price` sama persis dengan harga yang ditagih saat `/customer/event-bookings/initiate` (dibulatkan ke Rp 1.000). `available` = tidak bentrok dengan booking reguler atau event lain saat ini.
+
+### 👤 Customer (`/api/customer`, cookie `customer_token`)
+
+**Tanpa auth:**
+
+| Method | Endpoint | Keterangan |
+|--------|----------|------------|
+| POST | `/login` | Login, server set cookie `customer_token` |
+| POST | `/forgot-password` | Kirim link reset password |
+| GET | `/reset-password/:token/validate` | Validasi token reset |
+| POST | `/reset-password/:token` | Reset password |
+
+**Butuh login:**
+
+| Method | Endpoint | Keterangan |
+|--------|----------|------------|
+| GET | `/me` | Data customer yang login |
+| POST | `/logout` | Logout (semua token lama ditolak) |
+| PUT | `/profile` | Update profil |
+| PUT | `/change-password` | Ganti password. Password lama salah → **400** (bukan 401) |
+| GET | `/room-recommendations` | Rekomendasi room |
+| GET | `/credits/expiring` | Play credits yang akan kadaluwarsa |
+| GET | `/my-credits` | Play credits milik customer |
+| GET | `/vouchers/available` | Voucher yang bisa dipakai |
+| POST | `/bookings/initiate` | Buat hold + invoice Xendit |
+| GET | `/bookings` | List booking (query: `page`, `per_page` maks 50, `status`) |
+| GET | `/bookings/by-hold/:hold_id` | Status pembayaran hold untuk halaman payment success |
+| GET | `/bookings/:id` | Detail booking |
+| POST | `/play-credits/purchase/initiate` | Beli paket play credits (invoice Xendit) |
+| POST | `/event-bookings/initiate` | Buat event booking + invoice Xendit |
+| POST | `/fnb/orders` | Pesan FnB |
+| GET | `/fnb/orders` | Riwayat pesanan FnB |
+
+Endpoint `.../mock-confirm` (booking, play credits, event) hanya terdaftar saat `XENDIT_SECRET_KEY` kosong (mock mode dev).
+
+**`GET /bookings`** — `status` opsional, dipisah koma: `upcoming`, `ongoing`, `completed`, `cancelled` (contoh `?status=upcoming,ongoing`). Nilai lain → 400. Status di DB bisa basi, karena sinkronisasi massal hanya jalan saat dashboard admin dibuka. Karena itu, sebelum query, status booking milik customer disinkronkan dulu dengan waktu WIB sekarang.
+
+**`GET /bookings/by-hold/:hold_id`** — `data`: `{status, booking_code?, booking_id?}`:
+
+| `status` | Arti |
+|----------|------|
+| `pending` | Hold masih berlaku, webhook belum diproses |
+| `confirmed` | Booking sudah dibuat. `booking_code` dan `booking_id` terisi |
+| `expired` | Hold lewat `expires_at`. Belum final: webhook yang terlambat masih bisa mengonfirmasi jika slot kosong |
+
+Hold milik customer lain, ID tidak dikenal, dan hold yang sudah dibersihkan (±1 jam setelah expired) → **404** dengan body yang sama, supaya endpoint ini tidak bisa dipakai mengecek keberadaan ID.
+
+**Rate limit** (in-memory, per IP + route):
+
+| Endpoint | Batas |
+|----------|-------|
+| `/admin/auth/login`, `/admin/admin-recovery/request`, `/admin/admin-recovery/:token/reset` | 10/menit |
+| `/customer/login`, `/customer/forgot-password`, `/customer/reset-password/:token`, `/customer/change-password` | 10/menit |
+| `/customer/bookings/by-hold/:hold_id` | 30/menit |
+
+Lewat batas → **429**. Di belakang reverse proxy, `TRUSTED_PROXIES` wajib diset. Tanpa itu, `c.ClientIP()` = IP proxy, sehingga semua user berbagi satu kuota.
 
 ---
 
@@ -611,13 +697,16 @@ Trigger (create booking / create voucher / create customer)
 
 ## Autentikasi
 
-Semua endpoint protected menggunakan **Bearer JWT**.
+Token JWT dikirim lewat **cookie HttpOnly**, bukan header `Authorization` (header tidak diterima).
 
-```
-Authorization: Bearer <token>
-```
+| Aplikasi | Cookie | Path |
+|----------|--------|------|
+| Admin (staff) | `staff_token` | `/api/admin` |
+| Customer web | `customer_token` | `/api/customer` |
 
-JWT berisi: `staff_id`, `username`, `role_id`, `is_system`, `permissions[]`
+Path cookie dipisah supaya token staff tidak pernah terkirim ke rute customer, dan sebaliknya. Request yang mengubah data (POST/PUT/PATCH/DELETE) dengan header `Origin` yang tidak terdaftar di `ALLOWED_ORIGINS` ditolak (proteksi CSRF).
+
+JWT staff berisi: `staff_id`, `username`, `role_id`, `is_system`, `permissions[]`
 
 ---
 
@@ -666,12 +755,29 @@ POST /bookings
   └── [goroutine] Potong play credits + redeem voucher + kirim email notifikasi
 ```
 
+## Alur Booking Online (Customer)
+
+```
+POST /customer/bookings/initiate
+  ├── Hitung harga (sama dengan /public/booking/quote)
+  ├── Buat booking_hold (kunci unit room, berlaku 15 menit) + invoice Xendit
+  └── Redirect Xendit → {APP_URL}/payment/success?hold_id=<id>
+
+POST /webhook/xendit (status PAID)
+  ├── Hold expired + slot sudah terisi → log [PAYMENT ORPHAN], perlu refund manual
+  ├── Transaction: hapus hold + buat booking (bookings.hold_id = id hold)
+  └── [goroutine] Kirim email konfirmasi
+
+GET /customer/bookings/by-hold/:hold_id   ← dipolling halaman payment success
+  └── pending → confirmed (booking_code) / expired
+```
+
 ## Alur Event Booking
 
 ```
 POST /event-bookings
   ├── Hitung durasi otomatis dari start_time - end_time
-  ├── Cek overlap: ada regular booking di store & jam tersebut? → tolak
+  ├── Cek overlap: ada regular booking di store & jam tersebut? → tolak (termasuk tanggal sebelum/sesudah)
   ├── Cek overlap: ada event booking lain di store & jam tersebut? → tolak
   ├── Ambil harga event dari store_event_prices
   ├── Hitung total: round((price_per_day ÷ 24 × hours) / 1000) × 1000
