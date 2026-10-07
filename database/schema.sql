@@ -85,6 +85,7 @@ CREATE TABLE `bookings` (
   `cancelled_at` datetime(3) DEFAULT NULL,
   `cancelled_by` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `notes` text COLLATE utf8mb4_unicode_ci,
+  `hold_id` char(36) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `created_by` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `updated_by` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `created_at` datetime(3) DEFAULT NULL,
@@ -93,7 +94,8 @@ CREATE TABLE `bookings` (
   UNIQUE KEY `idx_bookings_booking_code` (`booking_code`),
   KEY `idx_bookings_store_id` (`store_id`),
   KEY `idx_bookings_room_id` (`room_id`),
-  KEY `idx_bookings_customer_id` (`customer_id`)
+  KEY `idx_bookings_customer_id` (`customer_id`),
+  KEY `idx_bookings_hold_id` (`hold_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;

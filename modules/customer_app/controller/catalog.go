@@ -75,6 +75,38 @@ func PublicGetStoreByID(c *gin.Context) {
 	utils.ResponseSuccess(c, http.StatusOK, "OK", store)
 }
 
+// publicRoomTemplate & publicFacility = whitelist field untuk endpoint public.
+// Kolom audit (created_by/updated_by berisi username staff) tidak boleh keluar.
+type publicRoomTemplate struct {
+	ID          uint    `json:"id"`
+	Name        string  `json:"name"`
+	Description *string `json:"description"`
+	ImageURL    *string `json:"image_url"`
+	CapacityMin uint    `json:"capacity_min"`
+	CapacityMax uint    `json:"capacity_max"`
+	MinPrice    float64 `json:"min_price"`
+}
+
+// publicRoomTemplateDetail: detail selalu mengirim key facilities (minimal []).
+type publicRoomTemplateDetail struct {
+	publicRoomTemplate
+	Facilities []publicFacility `json:"facilities"`
+}
+
+type publicFacility struct {
+	ID          uint    `json:"id"`
+	Name        string  `json:"name"`
+	IconURL     *string `json:"icon_url"`
+	Description *string `json:"description"`
+}
+
+func toPublicRoomTemplate(t models.RoomTemplate, minPrice float64) publicRoomTemplate {
+	return publicRoomTemplate{
+		ID: t.ID, Name: t.Name, Description: t.Description, ImageURL: t.ImageURL,
+		CapacityMin: t.CapacityMin, CapacityMax: t.CapacityMax, MinPrice: minPrice,
+	}
+}
+
 // PublicGetRoomTemplates mengambil room template yang tersedia di store tertentu.
 // Jika store_id dikirim → filter hanya room template yang punya unit aktif di store itu.
 // Jika store_id kosong → return semua room template aktif.
@@ -105,12 +137,7 @@ func PublicGetRoomTemplates(c *gin.Context) {
 	}
 
 	// Tambahkan min_price dari store yang dipilih (paket 1 jam)
-	type TemplateWithPrice struct {
-		models.RoomTemplate
-		MinPrice float64 `json:"min_price"`
-	}
-
-	var result []TemplateWithPrice
+	result := []publicRoomTemplate{}
 	for _, t := range templates {
 		var minPrice float64
 
@@ -127,7 +154,7 @@ func PublicGetRoomTemplates(c *gin.Context) {
 				Select("MIN(price)").Scan(&minPrice)
 		}
 
-		result = append(result, TemplateWithPrice{RoomTemplate: t, MinPrice: minPrice})
+		result = append(result, toPublicRoomTemplate(t, minPrice))
 	}
 
 	utils.ResponseSuccess(c, http.StatusOK, "OK", result)
@@ -144,7 +171,7 @@ func PublicGetRoomTemplateByID(c *gin.Context) {
 
 	var template models.RoomTemplate
 	if err := config.DB.
-		Preload("Facilities").
+		Preload("Facilities", "is_active = true AND deleted_at IS NULL").
 		Where("id = ? AND is_active = true AND deleted_at IS NULL", id).
 		First(&template).Error; err != nil {
 		utils.ResponseError(c, http.StatusNotFound, "Ruangan tidak ditemukan")
@@ -157,16 +184,11 @@ func PublicGetRoomTemplateByID(c *gin.Context) {
 		Where("room_template_id = ? AND duration_hours = 1 AND deleted_at IS NULL", id).
 		Select("MIN(price)").Scan(&minPrice)
 
-	utils.ResponseSuccess(c, http.StatusOK, "OK", gin.H{
-		"id":           template.ID,
-		"name":         template.Name,
-		"description":  template.Description,
-		"image_url":    template.ImageURL,
-		"capacity_min": template.CapacityMin,
-		"capacity_max": template.CapacityMax,
-		"facilities":   template.Facilities,
-		"min_price":    minPrice,
-	})
+	pub := publicRoomTemplateDetail{publicRoomTemplate: toPublicRoomTemplate(template, minPrice), Facilities: []publicFacility{}}
+	for _, f := range template.Facilities {
+		pub.Facilities = append(pub.Facilities, publicFacility{ID: f.ID, Name: f.Name, IconURL: f.IconURL, Description: f.Description})
+	}
+	utils.ResponseSuccess(c, http.StatusOK, "OK", pub)
 }
 
 // GetBookingSlots mengambil semua slot per jam dalam jam operasional store

@@ -31,10 +31,10 @@ func GetAllPublic(c *gin.Context) {
 	utils.ResponseSuccess(c, http.StatusOK, "OK", banners)
 }
 
-// GetByID mengambil detail satu banner.
-func GetByID(c *gin.Context) {
+// GetPublicByID mengambil detail satu banner aktif (public).
+func GetPublicByID(c *gin.Context) {
 	id, _ := strconv.Atoi(c.Param("id"))
-	banner, err := service.GetByID(uint(id))
+	banner, err := service.GetActiveByID(uint(id))
 	if err != nil {
 		utils.ResponseError(c, http.StatusNotFound, err.Error())
 		return

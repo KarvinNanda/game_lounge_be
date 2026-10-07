@@ -365,6 +365,7 @@ func ConfirmBookingFromWebhook(xenditInvoiceID, paymentMethod string) error {
 		PaymentMethod:    "cash", // Xendit dikategorikan cash untuk kompatibilitas enum existing
 		Status:           "upcoming",
 		CreatedBy:        &customerID,
+		HoldID:           &hold.ID,
 	}
 	voucher := holdVoucher(hold.PriceBreakdown)
 	if voucher.ID != "" {
@@ -438,8 +439,11 @@ func markVoucherUsed(tx *gorm.DB, voucherID, customerID, bookingID string, disco
 }
 
 // GetCustomerBookings mengambil list booking milik customer dengan pagination.
-func GetCustomerBookings(customerID string, page, perPage int) ([]models.Booking, int64, error) {
-	return repository.FindCustomerBookings(customerID, page, perPage)
+func GetCustomerBookings(customerID string, statuses []string, page, perPage int) ([]models.Booking, int64, error) {
+	if err := repository.SyncCustomerBookingStatus(customerID); err != nil {
+		return nil, 0, err
+	}
+	return repository.FindCustomerBookings(customerID, statuses, page, perPage)
 }
 
 // GetCustomerBookingByID mengambil satu booking milik customer.
@@ -448,6 +452,9 @@ func GetCustomerBookingByID(id, customerID string) (*models.Booking, error) {
 	if err != nil {
 		return nil, errors.New("booking tidak ditemukan")
 	}
+	// Status di DB bisa basi (lihat SyncCustomerBookingStatus): hitung dari waktu sekarang.
+	open, _ := repository.OperatingWindow(b.StoreID, b.BookingDate.Format("2006-01-02"))
+	b.Status = utils.SessionStatus(b.Status, b.BookingDate, b.StartTime, b.EndTime, open, time.Now())
 	return b, nil
 }
 
@@ -466,3 +473,35 @@ func getPriceForSlot(storeID string, roomTemplateID uint, date, startTime, endTi
 	})
 }
 
+
+// HoldStatus = status pembayaran sebuah hold untuk halaman payment success.
+type HoldStatus struct {
+	Status      string  `json:"status"` // pending | confirmed | expired
+	BookingCode *string `json:"booking_code,omitempty"`
+	BookingID   *string `json:"booking_id,omitempty"`
+}
+
+// GetHoldStatus memetakan hold ke booking untuk halaman payment success.
+// Webhook PAID menghapus hold dan membuat booking ber-hold_id, jadi booking dicek dulu.
+// Hold expired bisa masih jadi booking jika webhook terlambat (lihat ConfirmBookingFromWebhook),
+// jadi "expired" belum final selama hold masih ada.
+// Selalu dibatasi customerID: hold/booking milik customer lain = ErrHoldNotFound.
+func GetHoldStatus(holdID, customerID string) (*HoldStatus, error) {
+	if b, err := repository.FindBookingByHold(holdID, customerID); err == nil {
+		return &HoldStatus{Status: "confirmed", BookingCode: &b.BookingCode, BookingID: &b.ID}, nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+
+	h, err := repository.FindCustomerHold(holdID, customerID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrHoldNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if h.IsExpired() {
+		return &HoldStatus{Status: "expired"}, nil
+	}
+	return &HoldStatus{Status: "pending"}, nil
+}

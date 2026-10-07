@@ -124,30 +124,9 @@ func GetAvailableSlots(storeID string, roomTemplateID uint, date string, duratio
 }
 
 // OperatingWindow mengembalikan jam buka & tutup (menit dari 00:00) untuk store
-// pada tanggal tersebut. closeMins > 24*60 jika store tutup setelah tengah malam.
+// pada tanggal tersebut. Lihat eventRepo.OperatingWindow.
 func OperatingWindow(storeID, date string) (openMins, closeMins int) {
-	dayType := "weekday"
-	if d, err := time.Parse("2006-01-02", date); err == nil {
-		if d.Weekday() == time.Saturday || d.Weekday() == time.Sunday {
-			dayType = "weekend"
-		}
-	}
-
-	openTime, closeTime := "10:00", "02:00"
-	var opHours models.StoreOperatingHour
-	config.DB.Where(
-		"store_id = ? AND day_type = ? AND is_active = true AND deleted_at IS NULL",
-		storeID, dayType,
-	).First(&opHours)
-	if opHours.ID != 0 {
-		openTime, closeTime = opHours.OpenTime, opHours.CloseTime
-	}
-
-	openMins, closeMins = utils.MinsOf(openTime), utils.MinsOf(closeTime)
-	if closeMins <= openMins {
-		closeMins += 24 * 60 // operasional melewati tengah malam
-	}
-	return openMins, closeMins
+	return eventRepo.OperatingWindow(storeID, date)
 }
 
 // ── Hold ──────────────────────────────────────────────────────────────────────
@@ -325,19 +304,72 @@ func CleanExpiredHolds() error {
 // ── Customer Bookings ─────────────────────────────────────────────────────────
 
 // FindCustomerBookings mengambil list booking milik customer dengan pagination.
-func FindCustomerBookings(customerID string, page, perPage int) ([]models.Booking, int64, error) {
+// statuses kosong = semua status. Panggil SyncCustomerBookingStatus dulu supaya
+// filter memakai status sebenarnya, bukan status basi di DB.
+func FindCustomerBookings(customerID string, statuses []string, page, perPage int) ([]models.Booking, int64, error) {
 	var bookings []models.Booking
 	var total int64
 	q := config.DB.
 		Preload("Room.RoomTemplate").
 		Preload("Store").
 		Where("customer_id = ?", customerID)
+	if len(statuses) > 0 {
+		q = q.Where("status IN ?", statuses)
+	}
 
 	q.Model(&models.Booking{}).Count(&total)
 
 	err := q.Order("booking_date DESC, start_time DESC").
 		Offset((page-1)*perPage).Limit(perPage).Find(&bookings).Error
 	return bookings, total, err
+}
+
+// SyncCustomerBookingStatus memperbarui status upcoming/ongoing milik customer
+// berdasarkan waktu WIB sekarang. Sama seperti bookingRepo.BatchUpdateStatus
+// (yang hanya jalan saat dashboard admin dibuka), tapi per customer.
+func SyncCustomerBookingStatus(customerID string) error {
+	now := time.Now()
+	today := now.In(utils.JakartaLoc()).Format("2006-01-02")
+
+	var bookings []models.Booking
+	if err := config.DB.Select("id", "store_id", "booking_date", "start_time", "end_time", "status").
+		Where("customer_id = ? AND status IN ('upcoming','ongoing') AND booking_date <= ?", customerID, today).
+		Find(&bookings).Error; err != nil {
+		return err
+	}
+	opens := map[string]int{}
+	for _, b := range bookings {
+		date := b.BookingDate.Format("2006-01-02")
+		key := b.StoreID + "|" + date
+		if _, ok := opens[key]; !ok {
+			opens[key], _ = OperatingWindow(b.StoreID, date)
+		}
+		next := utils.SessionStatus(b.Status, b.BookingDate, b.StartTime, b.EndTime, opens[key], now)
+		if next == b.Status {
+			continue
+		}
+		// Bersyarat pada status lama: tidak menimpa pembatalan yang terjadi bersamaan.
+		if err := config.DB.Model(&models.Booking{}).Where("id = ? AND status = ?", b.ID, b.Status).
+			Update("status", next).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// FindBookingByHold mengambil booking hasil konfirmasi hold milik customer tertentu.
+func FindBookingByHold(holdID, customerID string) (*models.Booking, error) {
+	var b models.Booking
+	err := config.DB.Select("id", "booking_code").
+		Where("hold_id = ? AND customer_id = ?", holdID, customerID).First(&b).Error
+	return &b, err
+}
+
+// FindCustomerHold mengambil hold milik customer tertentu (tanpa preload).
+func FindCustomerHold(holdID, customerID string) (*models.BookingHold, error) {
+	var h models.BookingHold
+	err := config.DB.Where("id = ? AND customer_id = ?", holdID, customerID).First(&h).Error
+	return &h, err
 }
 
 // FindCustomerBookingByID mengambil satu booking milik customer tertentu.

@@ -31,6 +31,7 @@ type Booking struct {
 	CancelledAt      *time.Time `json:"cancelled_at"`
 	CancelledBy      *string    `gorm:"size:255" json:"cancelled_by"`
 	Notes            *string    `gorm:"type:text" json:"notes"`
+	HoldID           *string    `gorm:"type:char(36);index" json:"-"` // hold asal (booking online); untuk /customer/bookings/by-hold
 	CreatedBy        *string    `gorm:"size:255" json:"created_by"`
 	UpdatedBy        *string    `gorm:"size:255" json:"updated_by"`
 	CreatedAt        time.Time  `json:"created_at"`

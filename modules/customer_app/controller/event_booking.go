@@ -18,7 +18,7 @@ import (
 )
 
 // CheckEventAvailability mengecek ketersediaan dan preview harga event.
-// Reuse: eventBookingService.PreviewPrice + eventBookingRepo untuk blocked ranges.
+// Reuse: eventBookingService.QuoteCustomerEvent + eventBookingRepo untuk blocked ranges.
 func CheckEventAvailability(c *gin.Context) {
 	storeID := c.Query("store_id")
 	date := c.Query("date")
@@ -59,8 +59,13 @@ func CheckEventAvailability(c *gin.Context) {
 	// Harga event — reuse service yang sudah ada
 	priceInfo := map[string]interface{}{"price_per_day": 0.0}
 	if startTime != "" && endTime != "" {
-		if preview, err := eventBookingService.PreviewPrice(storeID, startTime, endTime); err == nil {
-			priceInfo = preview
+		// Quote yang sama dengan harga yang ditagih saat initiate (bukan PreviewPrice admin).
+		if q, err := eventBookingService.QuoteCustomerEvent(storeID, date, startTime, endTime); err == nil {
+			priceInfo = map[string]interface{}{
+				"price_per_day":  q.PricePerDay,
+				"duration_hours": q.DurationHours,
+				"total_price":    q.TotalPrice,
+			}
 		}
 	} else {
 		if ep, err := eventBookingRepo.GetEventPrice(storeID); err == nil {
@@ -221,4 +226,24 @@ func MockConfirmEventBooking(c *gin.Context) {
 		"end_time":     eb.EndTime,
 		"total_price":  eb.TotalPrice,
 	})
+}
+
+// QuoteEventBooking — GET /public/event-booking/quote?store_id&booking_date&start_time&end_time
+// Harga event customer tanpa membuat booking. Logika sama dengan /customer/event-bookings/initiate.
+func QuoteEventBooking(c *gin.Context) {
+	storeID := c.Query("store_id")
+	date := c.Query("booking_date")
+	startTime := c.Query("start_time")
+	endTime := c.Query("end_time")
+	if storeID == "" || date == "" || startTime == "" || endTime == "" {
+		utils.ResponseError(c, http.StatusBadRequest, "store_id, booking_date, start_time, dan end_time wajib diisi")
+		return
+	}
+
+	quote, err := eventBookingService.QuoteCustomerEvent(storeID, date, startTime, endTime)
+	if err != nil {
+		utils.ResponseError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	utils.ResponseSuccess(c, http.StatusOK, "OK", quote)
 }

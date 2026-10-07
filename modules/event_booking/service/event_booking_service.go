@@ -55,6 +55,33 @@ func calculateTotalPrice(pricePerDay, durationHours float64) float64 {
 	return math.Round(raw/1000) * 1000
 }
 
+// eventDuration memvalidasi jam lalu menghitung durasi (jam). end <= start = lewat tengah malam.
+// Dipakai Create & QuoteCustomerEvent supaya quote selalu sama dengan harga yang ditagih.
+func eventDuration(startTime, endTime string) (float64, error) {
+	if !isHHMM(startTime) || !isHHMM(endTime) {
+		return 0, errors.New("format jam tidak valid (HH:MM)")
+	}
+	// start == end dulu dihitung sebagai event 24 jam.
+	if startTime[:5] == endTime[:5] {
+		return 0, errors.New("jam mulai dan jam selesai tidak boleh sama")
+	}
+	startMins := utils.MinsOf(startTime)
+	endMins := utils.MinsOf(endTime)
+	if endMins <= startMins {
+		endMins += 24 * 60
+	}
+	return float64(endMins-startMins) / 60.0, nil
+}
+
+// configuredEventPrice = harga event store; error jika belum dikonfigurasi.
+func configuredEventPrice(storeID string) (*models.StoreEventPrice, error) {
+	eventPrice, err := repository.GetEventPrice(storeID)
+	if err != nil || eventPrice.PricePerDay == 0 {
+		return nil, errors.New("harga event untuk cabang ini belum dikonfigurasi. Silakan atur di menu Pricing")
+	}
+	return eventPrice, nil
+}
+
 // ── CRUD ──────────────────────────────────────────────────────────────────────
 
 // GetAll mengambil list event booking.
@@ -106,21 +133,10 @@ func Create(req dto.CreateEventBookingRequest, createdBy string) (*models.EventB
 		}
 	}
 
-	if !isHHMM(startTime) || !isHHMM(endTime) {
-		return nil, errors.New("format jam tidak valid (HH:MM)")
+	durationHours, err := eventDuration(startTime, endTime)
+	if err != nil {
+		return nil, err
 	}
-	// start == end dulu dihitung sebagai event 24 jam.
-	if startTime[:5] == endTime[:5] {
-		return nil, errors.New("jam mulai dan jam selesai tidak boleh sama")
-	}
-
-	// Hitung durasi
-	startMins := utils.MinsOf(startTime)
-	endMins := utils.MinsOf(endTime)
-	if endMins <= startMins {
-		endMins += 24 * 60
-	}
-	durationHours := float64(endMins-startMins) / 60.0
 
 	// ── Validasi overlap ──────────────────────────────────────────────
 	hasRegularOverlap, _ := repository.CheckOverlapWithRegular(
@@ -138,9 +154,9 @@ func Create(req dto.CreateEventBookingRequest, createdBy string) (*models.EventB
 	}
 
 	// ── Harga ─────────────────────────────────────────────────────────
-	eventPrice, err := repository.GetEventPrice(req.StoreID)
-	if err != nil || eventPrice.PricePerDay == 0 {
-		return nil, errors.New("harga event untuk cabang ini belum dikonfigurasi. Silakan atur di menu Pricing")
+	eventPrice, err := configuredEventPrice(req.StoreID)
+	if err != nil {
+		return nil, err
 	}
 
 	var totalPrice float64
@@ -388,4 +404,57 @@ func ConfirmCustomerPayment(invoiceID string) error {
 		}
 		return tx.Model(&models.EventBooking{}).Where("id = ?", e.ID).Updates(updates).Error
 	})
+}
+
+// EventQuote = harga event customer sebelum booking dibuat.
+type EventQuote struct {
+	StoreID       string  `json:"store_id"`
+	BookingDate   string  `json:"booking_date"`
+	StartTime     string  `json:"start_time"`
+	EndTime       string  `json:"end_time"`
+	DurationHours float64 `json:"duration_hours"`
+	PricePerDay   float64 `json:"price_per_day"`
+	TotalPrice    float64 `json:"total_price"`
+	Available     bool    `json:"available"`
+}
+
+// QuoteCustomerEvent menghitung harga event customer tanpa membuat booking.
+// Customer selalu booking per jam (lihat customer_app.InitiateEventBooking), jadi
+// harga = calculateTotalPrice, sama persis dengan yang ditagih Create.
+// Available = tidak bentrok dengan booking reguler maupun event lain saat ini.
+func QuoteCustomerEvent(storeID, date, startTime, endTime string) (*EventQuote, error) {
+	if _, err := time.Parse("2006-01-02", date); err != nil {
+		return nil, errors.New("format booking_date tidak valid (YYYY-MM-DD)")
+	}
+	if date < time.Now().In(utils.JakartaLoc()).Format("2006-01-02") {
+		return nil, errors.New("tanggal event sudah lewat")
+	}
+	durationHours, err := eventDuration(startTime, endTime)
+	if err != nil {
+		return nil, err
+	}
+	eventPrice, err := configuredEventPrice(storeID)
+	if err != nil {
+		return nil, err
+	}
+
+	regular, err := repository.CheckOverlapWithRegular(storeID, date, startTime, endTime)
+	if err != nil {
+		return nil, err
+	}
+	event, err := repository.CheckOverlapWithEvent(storeID, date, startTime, endTime, "")
+	if err != nil {
+		return nil, err
+	}
+
+	return &EventQuote{
+		StoreID:       storeID,
+		BookingDate:   date,
+		StartTime:     startTime[:5],
+		EndTime:       endTime[:5],
+		DurationHours: durationHours,
+		PricePerDay:   eventPrice.PricePerDay,
+		TotalPrice:    calculateTotalPrice(eventPrice.PricePerDay, durationHours),
+		Available:     !regular && !event,
+	}, nil
 }
