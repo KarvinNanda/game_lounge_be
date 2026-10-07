@@ -8,7 +8,7 @@ type StoreRoom struct {
 	RoomTemplateID uint       `gorm:"not null" json:"room_template_id"`
 	UnitNumber     uint       `gorm:"not null" json:"unit_number"`
 	Name           string     `gorm:"size:150;not null" json:"name"`
-	IsActive       bool       `gorm:"default:true" json:"is_active"`
+	IsActive       bool       `json:"is_active"`
 	CreatedBy      *string    `gorm:"size:255" json:"created_by"`
 	UpdatedBy      *string    `gorm:"size:255" json:"updated_by"`
 	DeletedBy      *string    `gorm:"size:255" json:"deleted_by"`

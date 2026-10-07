@@ -224,7 +224,7 @@ func AssignCredit(req dto.AssignCreditRequest, createdBy string) (*MemberCreditR
 	}
 
 	// Kirim notifikasi ke customer (async — tidak blokir response)
-	go func() {
+	utils.SafeGo(func() {
 		customer, cErr := customerRepo.FindCustomerByID(req.CustomerID)
 		if cErr != nil {
 			return
@@ -248,7 +248,7 @@ func AssignCredit(req dto.AssignCreditRequest, createdBy string) (*MemberCreditR
 		if tmpl.IsWhatsappActive {
 			log.Printf("[PlayCredits][WhatsApp placeholder] → %s: %s", customer.Whatsapp, tmpl.WhatsappBody)
 		}
-	}()
+	})
 
 	return GetCreditByID(credit.ID)
 }
@@ -257,43 +257,27 @@ func AssignCredit(req dto.AssignCreditRequest, createdBy string) (*MemberCreditR
 // adjust_hours: positif = tambah jam, negatif = kurangi jam
 // extend_days: hari yang ditambahkan ke expires_at
 func AdjustCredit(id string, req dto.AdjustCreditRequest, updatedBy string) (*MemberCreditResponse, error) {
-	credit, err := repository.FindCreditByID(id)
-	if err != nil {
+	if _, err := repository.FindCreditByID(id); err != nil {
 		return nil, errors.New("credits tidak ditemukan")
 	}
-
-	// Adjust jam
-	if req.AdjustHours != 0 {
-		newRemaining := credit.RemainingHours + req.AdjustHours
-		if newRemaining < 0 {
-			return nil, errors.New("sisa jam tidak boleh negatif")
-		}
-		credit.RemainingHours = newRemaining
+	if req.ExtendDays < 0 {
+		return nil, errors.New("extend_days tidak boleh negatif")
 	}
 
-	// Perpanjang masa berlaku
-	if req.ExtendDays > 0 {
-		credit.ExpiresAt = credit.ExpiresAt.AddDate(0, 0, req.ExtendDays)
-	}
-
-	// Append notes dengan timestamp & actor
+	// Catatan diberi timestamp & actor
+	entry := ""
 	if req.Notes != "" {
-		entry := "[" + time.Now().Format("02/01/2006 15:04") + " - " + updatedBy + "] " + req.Notes
-		if credit.Notes != nil && *credit.Notes != "" {
-			combined := *credit.Notes + "\n" + entry
-			credit.Notes = &combined
-		} else {
-			credit.Notes = &entry
-		}
+		entry = "[" + time.Now().Format("02/01/2006 15:04") + " - " + updatedBy + "] " + req.Notes
 	}
 
-	credit.UpdatedBy = &updatedBy
-
-	if err := repository.UpdateCredit(credit); err != nil {
+	if err := repository.AdjustCreditAtomic(id, req.AdjustHours, req.ExtendDays, entry, updatedBy); err != nil {
+		if errors.Is(err, repository.ErrNegativeHours) {
+			return nil, err
+		}
 		return nil, errors.New("gagal update credits")
 	}
 
-	return GetCreditByID(credit.ID)
+	return GetCreditByID(id)
 }
 
 // DeleteCredit soft-delete credit.

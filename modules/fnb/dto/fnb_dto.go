@@ -40,12 +40,12 @@ type UpdateItemRequest struct {
 type CreateFnbOrderRequest struct {
 	BookingID string           `json:"booking_id" binding:"required"`
 	Notes     string           `json:"notes"`
-	Items     []FnbOrderItemReq `json:"items" binding:"required,min=1"`
+	Items     []FnbOrderItemReq `json:"items" binding:"required,min=1,max=30,dive"`
 }
 
 type FnbOrderItemReq struct {
 	ItemID   uint   `json:"item_id" binding:"required"`
-	Quantity int    `json:"quantity" binding:"required,min=1"`
+	Quantity int    `json:"quantity" binding:"required,min=1,max=50"`
 	Notes    string `json:"notes"`
 }
 

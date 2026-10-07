@@ -13,7 +13,7 @@ type PlayCreditsPackage struct {
 	Price            float64    `gorm:"type:decimal(12,2);not null" json:"price"`
 	ValidityDays     uint       `gorm:"not null" json:"validity_days"`
 	Description      *string    `gorm:"type:text" json:"description"`
-	IsActive         bool       `gorm:"default:true" json:"is_active"`
+	IsActive         bool       `json:"is_active"`
 	ApplyToAllStores bool       `gorm:"default:false" json:"apply_to_all_stores"`
 	CreatedBy        *string    `gorm:"size:255" json:"created_by"`
 	UpdatedBy        *string    `gorm:"size:255" json:"updated_by"`

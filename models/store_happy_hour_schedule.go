@@ -8,8 +8,8 @@ import "time"
 type StoreHappyHourSchedule struct {
 	ID        uint       `gorm:"primaryKey;autoIncrement" json:"id"`
 	StoreID   string     `gorm:"type:char(36);not null;index" json:"store_id"`
-	StartTime string     `gorm:"type:time;not null" json:"start_time"`
-	EndTime   string     `gorm:"type:time;not null" json:"end_time"`
+	StartTime string     `gorm:"type:time(0);not null" json:"start_time"`
+	EndTime   string     `gorm:"type:time(0);not null" json:"end_time"`
 	CreatedBy *string    `gorm:"size:255" json:"created_by"`
 	UpdatedBy *string    `gorm:"size:255" json:"updated_by"`
 	DeletedBy *string    `gorm:"size:255" json:"deleted_by"`

@@ -1,9 +1,14 @@
 package repository
 
 import (
+	"errors"
+	"time"
+
 	"game_lounge_be/config"
 	"game_lounge_be/models"
-	"time"
+
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // ── Pricing Config ────────────────────────────────────────────
@@ -50,8 +55,34 @@ func FindPricingConfigByStoreID(storeID string) (*models.StorePricing, error) {
 }
 
 // CreatePricing membuat pricing config baru untuk store.
+// store_id UNIQUE sementara delete bersifat soft delete: jika store pernah punya
+// pricing yang sudah dihapus, baris itu dihidupkan kembali dengan nilai baru
+// (INSERT baru akan ditolak UNIQUE dengan error 1062).
 func CreatePricing(pricing *models.StorePricing) error {
-	return config.DB.Create(pricing).Error
+	return config.DB.Transaction(func(tx *gorm.DB) error {
+		var old models.StorePricing
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("store_id = ? AND deleted_at IS NOT NULL", pricing.StoreID).First(&old).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return tx.Create(pricing).Error
+		}
+		if err != nil {
+			return err
+		}
+		if err := tx.Model(&old).Updates(map[string]interface{}{
+			"is_happy_hour_enabled": pricing.IsHappyHourEnabled,
+			"is_mixed_time_enabled": pricing.IsMixedTimeEnabled,
+			"edge_case_2h":          pricing.EdgeCase2h,
+			"edge_case_4h":          pricing.EdgeCase4h,
+			"updated_by":            pricing.CreatedBy,
+			"deleted_at":            nil,
+			"deleted_by":            nil,
+		}).Error; err != nil {
+			return err
+		}
+		pricing.ID = old.ID
+		return nil
+	})
 }
 
 // UpdatePricing menyimpan perubahan pricing config.

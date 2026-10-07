@@ -8,7 +8,7 @@ type Facility struct {
 	Name        string     `gorm:"size:100;not null" json:"name"`
 	IconURL     *string    `gorm:"size:255" json:"icon_url"`
 	Description *string    `gorm:"type:text" json:"description"`
-	IsActive    bool       `gorm:"default:true" json:"is_active"`
+	IsActive    bool       `json:"is_active"`
 	CreatedBy   *string    `gorm:"size:255" json:"created_by"`
 	UpdatedBy   *string    `gorm:"size:255" json:"updated_by"`
 	DeletedBy   *string    `gorm:"size:255" json:"deleted_by"`

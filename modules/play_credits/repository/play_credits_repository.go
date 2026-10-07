@@ -7,6 +7,8 @@ import (
 
 	"game_lounge_be/config"
 	"game_lounge_be/models"
+
+	"gorm.io/gorm"
 )
 
 // ── Package ───────────────────────────────────────────────────────────────────
@@ -155,14 +157,6 @@ func SoftDeleteCredit(credit *models.CustomerPlayCredit, deletedBy string) error
 	}).Error
 }
 
-// DeductHours mengurangi remaining_hours saat booking menggunakan credits.
-// Dipanggil dari modul booking nanti.
-func DeductHours(creditID string, hours float64) error {
-	return config.DB.Model(&models.CustomerPlayCredit{}).
-		Where("id = ?", creditID).
-		Update("remaining_hours", config.DB.Raw("remaining_hours - ?", hours)).Error
-}
-
 // ValidateAndDeductPlayCredits memvalidasi play credits sebelum digunakan untuk booking.
 // Cek: credits masih aktif, belum expired pada tanggal booking, sisa jam cukup.
 // Menggunakan FIFO — kredit yang mau expired paling awal dipakai duluan.
@@ -228,4 +222,34 @@ func ValidateAndDeductPlayCredits(customerID, bookingDate string, durationHours 
 	}
 
 	return &credit, nil
+}
+
+// ErrNegativeHours: penyesuaian akan membuat sisa jam negatif.
+var ErrNegativeHours = errors.New("sisa jam tidak boleh negatif")
+
+// AdjustCreditAtomic menambah/mengurangi jam, memperpanjang masa berlaku, dan
+// menambah catatan dalam 1 UPDATE. Nilai dihitung oleh MySQL dari nilai terkini
+// (bukan hasil baca sebelumnya), sehingga potongan dari booking yang terjadi
+// bersamaan tidak tertimpa. Guard remaining_hours + adjust >= 0 mencegah saldo negatif.
+func AdjustCreditAtomic(id string, adjustHours float64, extendDays int, noteEntry, updatedBy string) error {
+	updates := map[string]interface{}{
+		"remaining_hours": gorm.Expr("remaining_hours + ?", adjustHours),
+		"updated_by":      updatedBy,
+	}
+	if extendDays > 0 {
+		updates["expires_at"] = gorm.Expr("DATE_ADD(expires_at, INTERVAL ? DAY)", extendDays)
+	}
+	if noteEntry != "" {
+		updates["notes"] = gorm.Expr("CASE WHEN notes IS NULL OR notes = '' THEN ? ELSE CONCAT(notes, '\n', ?) END", noteEntry, noteEntry)
+	}
+	res := config.DB.Model(&models.CustomerPlayCredit{}).
+		Where("id = ? AND deleted_at IS NULL AND remaining_hours + ? >= 0", id, adjustHours).
+		Updates(updates)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected != 1 {
+		return ErrNegativeHours
+	}
+	return nil
 }

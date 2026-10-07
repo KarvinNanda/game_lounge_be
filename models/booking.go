@@ -15,8 +15,8 @@ type Booking struct {
 	CustomerWhatsapp *string    `gorm:"size:20" json:"customer_whatsapp"`
 	CustomerEmail    *string    `gorm:"size:150" json:"customer_email"`
 	BookingDate      time.Time  `gorm:"type:date;not null" json:"booking_date"`
-	StartTime        string     `gorm:"type:time;not null" json:"start_time"`
-	EndTime          string     `gorm:"type:time;not null" json:"end_time"`
+	StartTime        string     `gorm:"type:time(0);not null" json:"start_time"`
+	EndTime          string     `gorm:"type:time(0);not null" json:"end_time"`
 	DurationHours    float64    `gorm:"type:decimal(4,1);not null" json:"duration_hours"`
 	PriceBreakdown   *string    `gorm:"type:json" json:"price_breakdown"`
 	BasePrice        float64    `gorm:"type:decimal(12,2);not null" json:"base_price"`

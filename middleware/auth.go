@@ -70,12 +70,25 @@ func AuthMiddleware() gin.HandlerFunc {
 			return
 		}
 
+		// Role & permission dibaca dari DB, bukan dari claims JWT: staff yang
+		// dihapus atau diturunkan role-nya langsung kehilangan akses.
+		access, err := loadStaffAccess(claims.StaffID)
+		if err != nil || access.TokenVersion != claims.TokenVersion {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"success": false,
+				"message": "Sesi tidak valid atau sudah berakhir",
+			})
+			return
+		}
+
 		c.Set("staff_id", claims.StaffID)
 		c.Set("staff_username", claims.Username)
-		c.Set("role_id", claims.RoleID)
-		c.Set("staff_role_id", claims.RoleID) // alias eksplisit untuk kontrol akses
-		c.Set("is_system", claims.IsSystem)
-		c.Set("permissions", claims.Permissions)
+		c.Set("role_id", access.RoleID)
+		c.Set("staff_role_id", access.RoleID) // alias eksplisit untuk kontrol akses
+		c.Set("is_system", access.IsSystem)
+		c.Set("permissions", access.Permissions)
+		c.Set(ctxStoreAll, access.AllStores)
+		c.Set(ctxStoreIDs, access.StoreIDs)
 		c.Next()
 	}
 }

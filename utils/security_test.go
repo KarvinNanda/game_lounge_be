@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/golang-jwt/jwt/v5"
 )
 
 // ── JWT ───────────────────────────────────────────────────────
@@ -11,7 +14,7 @@ import (
 func TestJWT_RoundTrip_Staff(t *testing.T) {
 	t.Setenv("JWT_SECRET", "test-secret-untuk-unit-test")
 
-	token, err := GenerateJWT("staff-1", "admin", 2, false, []string{"booking.read"})
+	token, err := GenerateJWT("staff-1", "admin", 2, false, []string{"booking.read"}, 0)
 	if err != nil {
 		t.Fatalf("GenerateJWT error: %v", err)
 	}
@@ -31,7 +34,7 @@ func TestJWT_RoundTrip_Staff(t *testing.T) {
 func TestJWT_RoundTrip_Customer(t *testing.T) {
 	t.Setenv("JWT_SECRET", "test-secret-untuk-unit-test")
 
-	token, err := GenerateCustomerJWT("cust-1", "member")
+	token, err := GenerateCustomerJWT("cust-1", "member", 0)
 	if err != nil {
 		t.Fatalf("GenerateCustomerJWT error: %v", err)
 	}
@@ -48,10 +51,10 @@ func TestJWT_RoundTrip_Customer(t *testing.T) {
 func TestJWT_EmptySecret_Ditolak(t *testing.T) {
 	t.Setenv("JWT_SECRET", "")
 
-	if _, err := GenerateJWT("s", "u", 1, false, nil); err == nil {
+	if _, err := GenerateJWT("s", "u", 1, false, nil, 0); err == nil {
 		t.Error("GenerateJWT harus error saat JWT_SECRET kosong")
 	}
-	if _, err := GenerateCustomerJWT("c", "member"); err == nil {
+	if _, err := GenerateCustomerJWT("c", "member", 0); err == nil {
 		t.Error("GenerateCustomerJWT harus error saat JWT_SECRET kosong")
 	}
 	if _, err := ValidateJWT("token-apapun"); err == nil {
@@ -64,7 +67,7 @@ func TestJWT_EmptySecret_Ditolak(t *testing.T) {
 
 func TestJWT_TokenDipalsukan_Ditolak(t *testing.T) {
 	t.Setenv("JWT_SECRET", "secret-asli")
-	token, _ := GenerateJWT("staff-1", "admin", 1, true, nil)
+	token, _ := GenerateJWT("staff-1", "admin", 1, true, nil, 0)
 
 	// Validasi dengan secret berbeda → harus gagal
 	t.Setenv("JWT_SECRET", "secret-penyerang")
@@ -77,16 +80,48 @@ func TestJWT_StaffToken_BukanCustomerToken(t *testing.T) {
 	t.Setenv("JWT_SECRET", "test-secret-untuk-unit-test")
 
 	// Staff token dipakai di endpoint customer → harus ditolak
-	staffToken, _ := GenerateJWT("staff-1", "admin", 1, true, nil)
+	staffToken, _ := GenerateJWT("staff-1", "admin", 1, true, nil, 0)
 	if _, err := ValidateCustomerJWT(staffToken); err == nil {
 		t.Error("staff token tidak boleh lolos validasi customer")
+	}
+}
+
+func TestJWT_CustomerToken_BukanStaffToken(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret-untuk-unit-test")
+
+	// Customer token dikirim sebagai staff_token → harus ditolak.
+	// Dulu lolos dengan StaffID kosong karena secret sama & tanpa audience.
+	customerToken, _ := GenerateCustomerJWT("cust-1", "regular", 0)
+	if _, err := ValidateJWT(customerToken); err == nil {
+		t.Error("customer token tidak boleh lolos validasi staff")
+	}
+}
+
+func TestJWT_TanpaAudience_Ditolak(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret-untuk-unit-test")
+
+	// Token format lama (tanpa claim aud) harus ditolak oleh kedua validator.
+	staffClaims := JWTClaims{StaffID: "staff-1", RegisteredClaims: jwt.RegisteredClaims{
+		ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+	}}
+	staffToken, _ := jwt.NewWithClaims(jwt.SigningMethodHS256, staffClaims).SignedString([]byte("test-secret-untuk-unit-test"))
+	if _, err := ValidateJWT(staffToken); err == nil {
+		t.Error("staff token tanpa aud harus ditolak")
+	}
+
+	custClaims := CustomerJWTClaims{CustomerID: "cust-1", RegisteredClaims: jwt.RegisteredClaims{
+		ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+	}}
+	custToken, _ := jwt.NewWithClaims(jwt.SigningMethodHS256, custClaims).SignedString([]byte("test-secret-untuk-unit-test"))
+	if _, err := ValidateCustomerJWT(custToken); err == nil {
+		t.Error("customer token tanpa aud harus ditolak")
 	}
 }
 
 func TestJWT_TokenRusak_Ditolak(t *testing.T) {
 	t.Setenv("JWT_SECRET", "test-secret-untuk-unit-test")
 
-	token, _ := GenerateJWT("staff-1", "admin", 1, false, nil)
+	token, _ := GenerateJWT("staff-1", "admin", 1, false, nil, 0)
 	tampered := token[:len(token)-4] + "XXXX" // rusak signature
 
 	if _, err := ValidateJWT(tampered); err == nil {
@@ -140,9 +175,9 @@ func TestSanitizeFolder_PathTraversal(t *testing.T) {
 	}{
 		{"stores", "stores"},
 		{"room_templates", "room_templates"},
-		{"../../etc", "etc"},          // traversal dihapus
-		{"..\\windows", "windows"},    // backslash dihapus
-		{"a/b/c", "abc"},              // slash dihapus
+		{"../../etc", "etc"},       // traversal dihapus
+		{"..\\windows", "windows"}, // backslash dihapus
+		{"a/b/c", "abc"},           // slash dihapus
 		{"  spaced  ", "spaced"},
 		{"nama-folder_1", "nama-folder_1"},
 		{"<script>", "script"},
@@ -225,5 +260,29 @@ func TestValidateFileContent_SVGTanpaTagSVG(t *testing.T) {
 	notSVG := `hello ini cuma text biasa`
 	if _, err := validateFileContent(strings.NewReader(notSVG), ".svg"); err == nil {
 		t.Error("file text tanpa tag <svg> harus ditolak")
+	}
+}
+
+func TestJWT_TokenVersionIkutDalamClaims(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret-untuk-unit-test")
+	st, _ := GenerateJWT("staff-1", "admin", 1, false, nil, 7)
+	sc, err := ValidateJWT(st)
+	if err != nil || sc.TokenVersion != 7 {
+		t.Errorf("staff tv: want 7, got %+v %v", sc, err)
+	}
+	ct, _ := GenerateCustomerJWT("cust-1", "member", 4)
+	cc, err := ValidateCustomerJWT(ct)
+	if err != nil || cc.TokenVersion != 4 {
+		t.Errorf("customer tv: want 4, got %+v %v", cc, err)
+	}
+}
+
+func TestHashToken(t *testing.T) {
+	a, b := HashToken("abc"), HashToken("abc")
+	if a != b || len(a) != 64 || a == "abc" {
+		t.Errorf("HashToken harus deterministik, 64 hex char, bukan plaintext: %q", a)
+	}
+	if HashToken("abd") == a {
+		t.Error("input beda harus menghasilkan hash beda")
 	}
 }

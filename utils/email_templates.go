@@ -2,6 +2,7 @@ package utils
 
 import (
 	"fmt"
+	"html"
 	"log"
 
 	"game_lounge_be/models"
@@ -10,6 +11,10 @@ import (
 // BuildBookingEmailHTML membuat HTML email konfirmasi booking yang menarik.
 // Dipakai sebagai fallback ketika template DB belum diisi admin.
 func BuildBookingEmailHTML(bookingCode, customerName, roomName, date, startTime, endTime, durasi, totalHarga string) string {
+	// Semua nilai di-escape: nama customer bisa diisi bebas lewat profil.
+	bookingCode, customerName, roomName = html.EscapeString(bookingCode), html.EscapeString(customerName), html.EscapeString(roomName)
+	date, startTime, endTime = html.EscapeString(date), html.EscapeString(startTime), html.EscapeString(endTime)
+	durasi, totalHarga = html.EscapeString(durasi), html.EscapeString(totalHarga)
 	roomRow := ""
 	if roomName != "" {
 		roomRow = fmt.Sprintf(`
@@ -147,10 +152,11 @@ func SendBookingConfirmationEmail(customer models.Customer, booking *models.Book
 	}
 }
 
-
 // BuildVoucherEmailHTML membuat HTML email notifikasi voucher yang menarik.
 // Dipakai sebagai fallback ketika template DB belum diisi admin.
 func BuildVoucherEmailHTML(customerName, voucherName, code, expiry, description string) string {
+	customerName, voucherName, code = html.EscapeString(customerName), html.EscapeString(voucherName), html.EscapeString(code)
+	expiry, description = html.EscapeString(expiry), html.EscapeString(description)
 	descBlock := ""
 	if description != "" {
 		descBlock = fmt.Sprintf(`

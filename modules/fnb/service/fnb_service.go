@@ -11,8 +11,10 @@ import (
 
 	"game_lounge_be/config"
 	"game_lounge_be/models"
+	customerBookingRepo "game_lounge_be/modules/customer_booking/repository"
 	"game_lounge_be/modules/fnb/dto"
 	"game_lounge_be/modules/fnb/repository"
+	"game_lounge_be/utils"
 
 	"github.com/google/uuid"
 )
@@ -103,13 +105,19 @@ func UpdateItem(id uint, req dto.UpdateItemRequest, actor string) (*models.FnbIt
 
 // CreateFnbOrder membuat pesanan FnB berdasarkan booking aktif customer.
 func CreateFnbOrder(req dto.CreateFnbOrderRequest, customerID string) (*models.FnbOrder, error) {
-	// Validasi booking aktif milik customer ini (status = ongoing)
+	// Validasi booking milik customer ini dan sesinya SEDANG berlangsung.
+	// Status dihitung live dari jam booking: status di DB hanya diperbarui saat
+	// dashboard admin dibuka, sehingga dulu customer sering ditolak.
 	var booking models.Booking
 	if err := config.DB.Preload("Room").
-		Where("id = ? AND customer_id = ? AND status = 'ongoing'",
+		Where("id = ? AND customer_id = ? AND status NOT IN ('cancelled','completed')",
 			req.BookingID, customerID).
 		First(&booking).Error; err != nil {
-		return nil, errors.New("tidak ada sesi bermain aktif untuk booking ini. Pastikan sesi sedang berlangsung")
+		return nil, errNoActiveSession
+	}
+	openMins, _ := customerBookingRepo.OperatingWindow(booking.StoreID, booking.BookingDate.Format("2006-01-02"))
+	if utils.SessionStatus(booking.Status, booking.BookingDate, booking.StartTime, booking.EndTime, openMins, time.Now()) != "ongoing" {
+		return nil, errNoActiveSession
 	}
 
 	// Hitung total + buat order items
@@ -163,12 +171,33 @@ func CreateFnbOrder(req dto.CreateFnbOrderRequest, customerID string) (*models.F
 	return repository.FindOrderByID(order.ID)
 }
 
+var errNoActiveSession = errors.New("tidak ada sesi bermain aktif untuk booking ini. Pastikan sesi sedang berlangsung")
+
+// canTransitionOrder: alur status order FnB. delivered & cancelled final.
+func canTransitionOrder(from, to string) bool {
+	switch from {
+	case "pending":
+		return to == "preparing" || to == "cancelled"
+	case "preparing":
+		return to == "delivered" || to == "cancelled"
+	}
+	return false
+}
+
 func UpdateOrderStatus(id, status string) (*models.FnbOrder, error) {
-	if _, err := repository.FindOrderByID(id); err != nil {
+	order, err := repository.FindOrderByID(id)
+	if err != nil {
 		return nil, errors.New("order tidak ditemukan")
 	}
-	if err := repository.UpdateOrderStatus(id, status); err != nil {
+	if !canTransitionOrder(order.Status, status) {
+		return nil, fmt.Errorf("status tidak bisa diubah dari %s ke %s", order.Status, status)
+	}
+	changed, err := repository.UpdateOrderStatus(id, order.Status, status)
+	if err != nil {
 		return nil, errors.New("gagal update status order")
+	}
+	if !changed {
+		return nil, errors.New("status order sudah diubah oleh pengguna lain, muat ulang data")
 	}
 	return repository.FindOrderByID(id)
 }

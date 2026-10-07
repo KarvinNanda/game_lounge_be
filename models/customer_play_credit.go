@@ -11,13 +11,13 @@ type CustomerPlayCredit struct {
 	PackageID       string     `gorm:"type:char(36);not null;index" json:"package_id"`
 	TotalHours      float64    `gorm:"type:decimal(8,1);not null" json:"total_hours"`
 	RemainingHours  float64    `gorm:"type:decimal(8,1);not null" json:"remaining_hours"`
-	PurchasedAt     time.Time  `gorm:"not null;default:CURRENT_TIMESTAMP" json:"purchased_at"`
+	PurchasedAt     time.Time  `gorm:"not null;default:CURRENT_TIMESTAMP(3)" json:"purchased_at"`
 	ExpiresAt       time.Time  `gorm:"not null" json:"expires_at"`
 	PaymentMethod   string     `gorm:"type:enum('manual','xendit');default:'manual'" json:"payment_method"`
 	PaymentAmount   *float64   `gorm:"type:decimal(12,2)" json:"payment_amount"`
 	XenditInvoiceID *string    `gorm:"size:255" json:"xendit_invoice_id"`
 	Notes           *string    `gorm:"type:text" json:"notes"`
-	IsActive        bool       `gorm:"default:true" json:"is_active"`
+	IsActive        bool       `json:"is_active"`
 	CreatedBy       *string    `gorm:"size:255" json:"created_by"`
 	UpdatedBy       *string    `gorm:"size:255" json:"updated_by"`
 	DeletedBy       *string    `gorm:"size:255" json:"deleted_by"`

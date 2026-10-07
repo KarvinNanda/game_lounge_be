@@ -11,6 +11,7 @@ type Staff struct {
 	PasswordHash string     `gorm:"size:255;not null" json:"-"`
 	// AvatarURL    *string    `gorm:"size:255" json:"avatar_url"`
 	IsAllStores  bool       `gorm:"default:false" json:"is_all_stores"`
+	TokenVersion uint       `gorm:"not null;default:0" json:"-"` // naik saat logout/ganti password → JWT lama ditolak
 	CreatedBy    *string    `gorm:"size:255" json:"created_by"`
 	UpdatedBy    *string    `gorm:"size:255" json:"updated_by"`
 	DeletedBy    *string    `gorm:"size:255" json:"deleted_by"`

@@ -12,8 +12,8 @@ type BookingHold struct {
 	RoomID           string    `gorm:"type:char(36);not null" json:"room_id"`
 	RoomTemplateID   uint      `gorm:"not null" json:"room_template_id"`
 	BookingDate      time.Time `gorm:"type:date;not null" json:"booking_date"`
-	StartTime        string    `gorm:"type:time;not null" json:"start_time"`
-	EndTime          string    `gorm:"type:time;not null" json:"end_time"`
+	StartTime        string    `gorm:"type:time(0);not null" json:"start_time"`
+	EndTime          string    `gorm:"type:time(0);not null" json:"end_time"`
 	DurationHours    float64   `gorm:"type:decimal(4,1)" json:"duration_hours"`
 	BasePrice        float64   `gorm:"type:decimal(12,2)" json:"base_price"`
 	TotalPrice       float64   `gorm:"type:decimal(12,2)" json:"total_price"`

@@ -186,14 +186,14 @@ func CreateVoucher(req dto.CreateVoucherRequest, createdBy string) (*VoucherWith
 	if req.SendChannel != "" {
 		voucherID := voucher.ID
 		sendChannel := req.SendChannel
-		go func() {
+		utils.SafeGo(func() {
 			// Reload dari DB agar RoomTemplates ter-preload
 			fullVoucher, err := repository.FindVoucherByID(voucherID)
 			if err != nil {
 				return
 			}
 			sendVoucherNotification(fullVoucher, sendChannel)
-		}()
+		})
 	}
 
 	return GetVoucherByID(voucher.ID)
@@ -355,7 +355,8 @@ func ValidateVoucher(req dto.ValidateVoucherRequest) (*dto.ValidateVoucherRespon
 	if voucher.StartDate.After(now) {
 		return &dto.ValidateVoucherResponse{IsValid: false, Message: "Voucher belum berlaku"}, nil
 	}
-	if voucher.EndDate != nil && voucher.EndDate.Before(now) {
+	// end_date adalah DATE (00:00) dan inklusif: berlaku sampai akhir hari tersebut.
+	if voucher.EndDate != nil && !now.Before(voucher.EndDate.AddDate(0, 0, 1)) {
 		return &dto.ValidateVoucherResponse{IsValid: false, Message: "Voucher sudah kadaluwarsa"}, nil
 	}
 	if voucher.Type != "both" && voucher.Type != req.UseType {
@@ -377,6 +378,11 @@ func ValidateVoucher(req dto.ValidateVoucherRequest) (*dto.ValidateVoucherRespon
 		if !storeValid {
 			return &dto.ValidateVoucherResponse{IsValid: false, Message: "Voucher tidak berlaku di cabang ini"}, nil
 		}
+	}
+
+	// Voucher hanya untuk customer bertipe member.
+	if customerType, err := repository.FindCustomerType(req.CustomerID); err != nil || customerType != "member" {
+		return &dto.ValidateVoucherResponse{IsValid: false, Message: "Voucher hanya untuk member"}, nil
 	}
 
 	// Cek minimum pembelian

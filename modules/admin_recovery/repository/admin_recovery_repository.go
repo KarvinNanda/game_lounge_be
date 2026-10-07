@@ -3,10 +3,14 @@ package repository
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"time"
 
 	"game_lounge_be/config"
 	"game_lounge_be/models"
+	"game_lounge_be/utils"
+
+	"gorm.io/gorm"
 )
 
 // GenerateToken membuat 32-byte random hex token yang unik.
@@ -38,11 +42,11 @@ func CountRequestsFromIP(ip string) (int64, error) {
 	return count, err
 }
 
-// CreateToken menyimpan token baru ke DB.
+// CreateToken menyimpan HASH token ke DB (token mentah hanya ada di email).
 func CreateToken(staffID, token, ip string) error {
 	t := &models.PasswordResetToken{
 		StaffID:   staffID,
-		Token:     token,
+		Token:     utils.HashToken(token),
 		IPAddress: ip,
 		ExpiresAt: time.Now().Add(15 * time.Minute),
 	}
@@ -53,22 +57,33 @@ func CreateToken(staffID, token, ip string) error {
 func FindValidToken(token string) (*models.PasswordResetToken, error) {
 	var t models.PasswordResetToken
 	err := config.DB.Preload("Staff.Role").
-		Where("token = ? AND expires_at > ? AND used_at IS NULL", token, time.Now()).
+		Where("token = ? AND expires_at > ? AND used_at IS NULL", utils.HashToken(token), time.Now()).
 		First(&t).Error
 	return &t, err
 }
 
-// MarkTokenUsed menandai token sudah dipakai (one-time use).
-func MarkTokenUsed(token string) error {
-	now := time.Now()
-	return config.DB.Model(&models.PasswordResetToken{}).
-		Where("token = ?", token).
-		Update("used_at", now).Error
-}
+// ErrTokenUsed: token sudah dipakai/expired di antara validasi dan konsumsi.
+var ErrTokenUsed = errors.New("token sudah dipakai atau kadaluwarsa")
 
-// UpdateStaffPassword memperbarui password hash staff berdasarkan ID.
-func UpdateStaffPassword(staffID, hashedPassword string) error {
-	return config.DB.Model(&models.Staff{}).
-		Where("id = ?", staffID).
-		Update("password_hash", hashedPassword).Error
+// ConsumeTokenAndSetPassword menandai token terpakai DAN mengganti password dalam
+// 1 transaction. Token diklaim dengan UPDATE bersyarat: 2 request bersamaan
+// dengan token yang sama → hanya 1 yang mendapat RowsAffected == 1.
+func ConsumeTokenAndSetPassword(token, staffID, hashedPassword string) error {
+	return config.DB.Transaction(func(tx *gorm.DB) error {
+		claim := tx.Model(&models.PasswordResetToken{}).
+			Where("token = ? AND used_at IS NULL AND expires_at > ?", utils.HashToken(token), time.Now()).
+			Update("used_at", time.Now())
+		if claim.Error != nil {
+			return claim.Error
+		}
+		if claim.RowsAffected != 1 {
+			return ErrTokenUsed
+		}
+		return tx.Model(&models.Staff{}).
+			Where("id = ?", staffID).
+			Updates(map[string]interface{}{
+				"password_hash": hashedPassword,
+				"token_version": gorm.Expr("token_version + 1"), // akhiri sesi lama
+			}).Error
+	})
 }

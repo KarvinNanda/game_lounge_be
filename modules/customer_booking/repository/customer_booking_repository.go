@@ -1,11 +1,18 @@
 package repository
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"game_lounge_be/config"
 	"game_lounge_be/models"
+	eventRepo "game_lounge_be/modules/event_booking/repository"
+	"game_lounge_be/utils"
+
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // ── Availability ──────────────────────────────────────────────────────────────
@@ -30,42 +37,7 @@ func GetAvailableSlots(storeID string, roomTemplateID uint, date string, duratio
 		return []SlotInfo{}, nil
 	}
 
-	// Tentukan day_type berdasarkan hari dalam seminggu
-	parsedDate, err := time.Parse("2006-01-02", date)
-	dayType := "weekday"
-	if err == nil {
-		if parsedDate.Weekday() == time.Saturday || parsedDate.Weekday() == time.Sunday {
-			dayType = "weekend"
-		}
-	}
-
-	// Ambil jam operasional efektif
-	var openTime, closeTime string
-	var opHours models.StoreOperatingHour
-	config.DB.Where(
-		"store_id = ? AND day_type = ? AND is_active = true AND deleted_at IS NULL",
-		storeID, dayType,
-	).First(&opHours)
-
-	if opHours.ID == 0 {
-		openTime, closeTime = "10:00", "02:00"
-	} else {
-		openTime  = opHours.OpenTime
-		closeTime = opHours.CloseTime
-		// Potong ke HH:MM jika format HH:MM:SS
-		if len(openTime) > 5 {
-			openTime = openTime[:5]
-		}
-		if len(closeTime) > 5 {
-			closeTime = closeTime[:5]
-		}
-	}
-
-	openMins  := parseMins(openTime)
-	closeMins := parseMins(closeTime)
-	if closeMins <= openMins {
-		closeMins += 24 * 60 // operasional melewati tengah malam
-	}
+	openMins, closeMins := OperatingWindow(storeID, date)
 	durMins := int(durationHours * 60)
 
 	// Ambil ID semua unit room
@@ -88,12 +60,15 @@ func GetAvailableSlots(storeID string, roomTemplateID uint, date string, duratio
 		roomIDs, date, time.Now(),
 	).Find(&holds)
 
+	// Event (full venue) memblokir semua room di store.
+	events, _ := eventRepo.FindForDashboard(storeID, date)
+
 	// Generate slots dari openTime sampai closeTime - durasiSlot
 	var slots []SlotInfo
 	for startMins := openMins; startMins+durMins <= closeMins; startMins += 60 {
 		endMins   := startMins + durMins
-		slotStart := minsToTime(startMins)
-		slotEnd   := minsToTime(endMins)
+		slotStart := utils.MinsToClock(startMins)
+		slotEnd   := utils.MinsToClock(endMins)
 		available := false
 
 		for _, room := range rooms {
@@ -104,11 +79,7 @@ func GetAvailableSlots(storeID string, roomTemplateID uint, date string, duratio
 				if b.RoomID != room.ID {
 					continue
 				}
-				bS := parseMins(b.StartTime[:5])
-				bE := parseMins(b.EndTime[:5])
-				if bE <= bS {
-					bE += 24 * 60
-				}
+				bS, bE := utils.NormalizeRange(b.StartTime, b.EndTime, openMins)
 				if startMins < bE && endMins > bS {
 					conflict = true
 					break
@@ -121,11 +92,7 @@ func GetAvailableSlots(storeID string, roomTemplateID uint, date string, duratio
 					if h.RoomID != room.ID {
 						continue
 					}
-					hS := parseMins(h.StartTime[:5])
-					hE := parseMins(h.EndTime[:5])
-					if hE <= hS {
-						hE += 24 * 60
-					}
+					hS, hE := utils.NormalizeRange(h.StartTime, h.EndTime, openMins)
 					if startMins < hE && endMins > hS {
 						conflict = true
 						break
@@ -135,6 +102,13 @@ func GetAvailableSlots(storeID string, roomTemplateID uint, date string, duratio
 
 			if !conflict {
 				available = true
+				break
+			}
+		}
+
+		for _, e := range events {
+			if eS, eE := utils.NormalizeRange(e.StartTime, e.EndTime, openMins); startMins < eE && endMins > eS {
+				available = false
 				break
 			}
 		}
@@ -149,79 +123,153 @@ func GetAvailableSlots(storeID string, roomTemplateID uint, date string, duratio
 	return slots, nil
 }
 
-func parseMins(t string) int {
-	if len(t) < 5 {
-		return 0
+// OperatingWindow mengembalikan jam buka & tutup (menit dari 00:00) untuk store
+// pada tanggal tersebut. closeMins > 24*60 jika store tutup setelah tengah malam.
+func OperatingWindow(storeID, date string) (openMins, closeMins int) {
+	dayType := "weekday"
+	if d, err := time.Parse("2006-01-02", date); err == nil {
+		if d.Weekday() == time.Saturday || d.Weekday() == time.Sunday {
+			dayType = "weekend"
+		}
 	}
-	h := int(t[0]-'0')*10 + int(t[1]-'0')
-	m := int(t[3]-'0')*10 + int(t[4]-'0')
-	return h*60 + m
-}
 
-func minsToTime(m int) string {
-	m = m % (24 * 60)
-	return fmt.Sprintf("%02d:%02d", m/60, m%60)
+	openTime, closeTime := "10:00", "02:00"
+	var opHours models.StoreOperatingHour
+	config.DB.Where(
+		"store_id = ? AND day_type = ? AND is_active = true AND deleted_at IS NULL",
+		storeID, dayType,
+	).First(&opHours)
+	if opHours.ID != 0 {
+		openTime, closeTime = opHours.OpenTime, opHours.CloseTime
+	}
+
+	openMins, closeMins = utils.MinsOf(openTime), utils.MinsOf(closeTime)
+	if closeMins <= openMins {
+		closeMins += 24 * 60 // operasional melewati tengah malam
+	}
+	return openMins, closeMins
 }
 
 // ── Hold ──────────────────────────────────────────────────────────────────────
 
 // CreateHold mencari unit room tersedia lalu buat hold dalam satu DB transaction.
-// Mencegah race condition: dua customer tidak bisa hold unit yang sama secara bersamaan.
-func CreateHold(h *models.BookingHold) (*models.BookingHold, error) {
-	tx := config.DB.Begin()
+// Baris store_rooms dikunci (SELECT ... FOR UPDATE), sehingga 2 request untuk
+// room type yang sama diproses bergantian dan tidak bisa hold unit yang sama.
+//
+// reserve (opsional) = reservasi voucher. Dibuat di transaction yang sama:
+// UNIQUE(voucher_id, customer_id) menolak hold paralel dengan voucher yang sama.
+func CreateHold(h *models.BookingHold, reserve *models.VoucherUsage) (*models.BookingHold, error) {
+	bookingDateStr := h.BookingDate.Format("2006-01-02")
+	openMins, _ := OperatingWindow(h.StoreID, bookingDateStr)
+	newStart, newEnd := utils.NormalizeRange(h.StartTime, h.EndTime, openMins)
 
-	// Lock & cari room tersedia untuk store + template yang diminta
-	var rooms []models.StoreRoom
-	tx.Set("gorm:query_option", "FOR UPDATE").
-		Where(
-			"store_id = ? AND room_template_id = ? AND is_active = true AND deleted_at IS NULL",
-			h.StoreID, h.RoomTemplateID,
-		).Find(&rooms)
-
-	availableRoomID := ""
-	bookingDateStr  := h.BookingDate.Format("2006-01-02")
-
-	for _, room := range rooms {
-		// Cek booking conflict
-		var bCount int64
-		tx.Model(&models.Booking{}).
-			Where(
-				"room_id = ? AND booking_date = ? AND status NOT IN ('cancelled') AND start_time < ? AND end_time > ?",
-				room.ID, bookingDateStr, h.EndTime, h.StartTime,
-			).Count(&bCount)
-		if bCount > 0 {
-			continue
-		}
-
-		// Cek hold conflict
-		var hCount int64
-		tx.Model(&models.BookingHold{}).
-			Where(
-				"room_id = ? AND booking_date = ? AND expires_at > NOW() AND start_time < ? AND end_time > ?",
-				room.ID, bookingDateStr, h.EndTime, h.StartTime,
-			).Count(&hCount)
-		if hCount > 0 {
-			continue
-		}
-
-		availableRoomID = room.ID
-		break
+	// Event booking memblokir seluruh store.
+	if hasEvent, err := eventRepo.CheckOverlapWithEvent(h.StoreID, bookingDateStr, h.StartTime, h.EndTime, ""); err != nil {
+		return nil, err
+	} else if hasEvent {
+		return nil, fmt.Errorf("store sedang dipakai untuk event pada jam tersebut")
 	}
 
-	if availableRoomID == "" {
-		tx.Rollback()
-		return nil, fmt.Errorf("tidak ada unit ruangan yang tersedia pada jam tersebut")
-	}
+	err := config.DB.Transaction(func(tx *gorm.DB) error {
+		var rooms []models.StoreRoom
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("store_id = ? AND room_template_id = ? AND is_active = true AND deleted_at IS NULL",
+				h.StoreID, h.RoomTemplateID).
+			Order("unit_number").Find(&rooms).Error; err != nil {
+			return err
+		}
 
-	h.RoomID    = availableRoomID
-	h.ExpiresAt = time.Now().Add(15 * time.Minute)
+		roomIDs := make([]string, 0, len(rooms))
+		for _, r := range rooms {
+			roomIDs = append(roomIDs, r.ID)
+		}
+		var bookings []models.Booking
+		var holds []models.BookingHold
+		if len(roomIDs) > 0 {
+			if err := tx.Where("room_id IN ? AND booking_date = ? AND status != 'cancelled'", roomIDs, bookingDateStr).
+				Find(&bookings).Error; err != nil {
+				return err
+			}
+			if err := tx.Where("room_id IN ? AND booking_date = ? AND expires_at > ?", roomIDs, bookingDateStr, time.Now()).
+				Find(&holds).Error; err != nil {
+				return err
+			}
+		}
 
-	if err := tx.Create(h).Error; err != nil {
-		tx.Rollback()
+		busy := map[string]bool{}
+		for _, b := range bookings {
+			if s, e := utils.NormalizeRange(b.StartTime, b.EndTime, openMins); newStart < e && newEnd > s {
+				busy[b.RoomID] = true
+			}
+		}
+		for _, x := range holds {
+			if s, e := utils.NormalizeRange(x.StartTime, x.EndTime, openMins); newStart < e && newEnd > s {
+				busy[x.RoomID] = true
+			}
+		}
+
+		for _, r := range rooms {
+			if !busy[r.ID] {
+				h.RoomID = r.ID
+				h.ExpiresAt = time.Now().Add(HoldDuration)
+				if err := tx.Create(h).Error; err != nil {
+					return err
+				}
+				if reserve != nil {
+					if err := tx.Create(reserve).Error; err != nil {
+						if utils.IsDuplicateKey(err) {
+							return ErrVoucherAlreadyUsed
+						}
+						return err
+					}
+				}
+				return nil
+			}
+		}
+		return errNoRoomAvailable
+	})
+	if err != nil {
 		return nil, err
 	}
-	tx.Commit()
 	return h, nil
+}
+
+// HoldDuration = waktu customer untuk membayar. Invoice Xendit diberi durasi
+// yang sama supaya customer tidak bisa membayar setelah hold habis.
+const HoldDuration = 15 * time.Minute
+
+var errNoRoomAvailable = fmt.Errorf("tidak ada unit ruangan yang tersedia pada jam tersebut")
+
+// ErrVoucherAlreadyUsed: voucher sudah dipakai / sedang direservasi customer ini.
+var ErrVoucherAlreadyUsed = errors.New("voucher sudah digunakan")
+
+// HoldVoucherID membaca voucher_id dari price_breakdown hold ("" jika tidak ada).
+func HoldVoucherID(priceBreakdown string) string {
+	var b struct {
+		VoucherID string `json:"voucher_id"`
+	}
+	_ = json.Unmarshal([]byte(priceBreakdown), &b)
+	return b.VoucherID
+}
+
+// releaseVoucherReservation menghapus reservasi voucher (usage tanpa booking) milik hold.
+func releaseVoucherReservation(tx *gorm.DB, h *models.BookingHold) error {
+	voucherID := HoldVoucherID(h.PriceBreakdown)
+	if voucherID == "" {
+		return nil
+	}
+	return tx.Where("voucher_id = ? AND customer_id = ? AND booking_id IS NULL", voucherID, h.CustomerID).
+		Delete(&models.VoucherUsage{}).Error
+}
+
+// ReleaseHold menghapus hold beserta reservasi vouchernya (mis. invoice gagal dibuat).
+func ReleaseHold(h *models.BookingHold) error {
+	return config.DB.Transaction(func(tx *gorm.DB) error {
+		if err := releaseVoucherReservation(tx, h); err != nil {
+			return err
+		}
+		return tx.Delete(&models.BookingHold{}, "id = ?", h.ID).Error
+	})
 }
 
 func FindHoldByID(id string) (*models.BookingHold, error) {
@@ -254,10 +302,24 @@ func DeleteHold(id string) error {
 	return config.DB.Delete(&models.BookingHold{}, "id = ?", id).Error
 }
 
-// CleanExpiredHolds menghapus hold yang sudah expire.
-// Dapat dipanggil secara periodik (cron/goroutine).
-func CleanExpiredHolds() {
-	config.DB.Delete(&models.BookingHold{}, "expires_at < NOW()")
+// holdGracePeriod: hold expired tetap disimpan sebentar supaya webhook PAID yang
+// datang terlambat masih bisa menemukan hold-nya (lihat ConfirmBookingFromWebhook).
+const holdGracePeriod = time.Hour
+
+// CleanExpiredHolds menghapus hold yang sudah expire lebih dari holdGracePeriod.
+// Dipanggil periodik oleh jobs.StartCleanup.
+// Reservasi voucher milik hold tersebut ikut dilepas supaya voucher bisa dipakai lagi.
+func CleanExpiredHolds() error {
+	var holds []models.BookingHold
+	if err := config.DB.Where("expires_at < ?", time.Now().Add(-holdGracePeriod)).Find(&holds).Error; err != nil {
+		return err
+	}
+	for i := range holds {
+		if err := ReleaseHold(&holds[i]); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ── Customer Bookings ─────────────────────────────────────────────────────────

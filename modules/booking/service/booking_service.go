@@ -10,7 +10,7 @@ import (
 	"game_lounge_be/models"
 	"game_lounge_be/modules/booking/dto"
 	"game_lounge_be/modules/booking/repository"
-	customerRepo "game_lounge_be/modules/customer/repository"
+	customerBookingRepo "game_lounge_be/modules/customer_booking/repository"
 	ntService "game_lounge_be/modules/notification_template/service"
 	creditsRepo "game_lounge_be/modules/play_credits/repository"
 	pricingDto "game_lounge_be/modules/pricing/dto"
@@ -42,51 +42,47 @@ type BookingWithComputed struct {
 
 // ── Status Computation ────────────────────────────────────────────────────────
 
-// computeStatus menghitung status booking berdasarkan waktu Jakarta saat ini.
+// computeStatus menghitung status booking dari waktu sekarang (WIB).
 func computeStatus(b models.Booking) string {
-	if b.Status == "cancelled" || b.Status == "completed" {
-		return b.Status
-	}
-	now := time.Now().In(jakartaLoc)
-	today := now.Format("2006-01-02")
-	bookingDate := b.BookingDate.Format("2006-01-02")
-
-	startMins := parseTimeToMins(b.StartTime)
-	endMins := parseTimeToMins(b.EndTime)
-	if endMins <= startMins {
-		endMins += 24 * 60
-	}
-	nowMins := now.Hour()*60 + now.Minute()
-
-	if bookingDate < today {
-		return "completed"
-	}
-	if bookingDate == today {
-		if nowMins >= endMins {
-			return "completed"
-		}
-		if nowMins >= startMins {
-			return "ongoing"
-		}
-	}
-	return "upcoming"
+	return computeStatusAt(b, storeOpenMins(b.StoreID, b.BookingDate), time.Now())
 }
 
-func parseTimeToMins(t string) int {
-	if len(t) < 5 {
-		return 0
+// computeStatusAt = computeStatus dengan jam buka & waktu "sekarang" eksplisit (untuk test).
+// Sesi dihitung absolut (lihat utils.SessionStatus) supaya booking lintas tengah
+// malam, mis. 23:00–02:00, tetap "ongoing" sampai 02:00 hari berikutnya.
+func computeStatusAt(b models.Booking, openMins int, now time.Time) string {
+	return utils.SessionStatus(b.Status, b.BookingDate, b.StartTime, b.EndTime, openMins, now)
+}
+
+// storeOpenMins = jam buka store (menit) pada tanggal tersebut.
+func storeOpenMins(storeID string, date time.Time) int {
+	open, _ := customerBookingRepo.OperatingWindow(storeID, date.Format("2006-01-02"))
+	return open
+}
+
+// openCache menyimpan jam buka per store+tanggal selama 1 request list,
+// supaya status N booking tidak memicu N query jam operasional.
+type openCache map[string]int
+
+func (oc openCache) get(storeID string, date time.Time) int {
+	key := storeID + "|" + date.Format("2006-01-02")
+	if v, ok := oc[key]; ok {
+		return v
 	}
-	h := int(t[0]-'0')*10 + int(t[1]-'0')
-	m := int(t[3]-'0')*10 + int(t[4]-'0')
-	return h*60 + m
+	v := storeOpenMins(storeID, date)
+	oc[key] = v
+	return v
 }
 
 func enrichBooking(b models.Booking) BookingWithComputed {
-	b.Status = computeStatus(b)
-	now := time.Now().In(jakartaLoc)
-	endMins := parseTimeToMins(b.EndTime)
-	nowMins := now.Hour()*60 + now.Minute()
-	isEndingSoon := b.Status == "ongoing" && (endMins-nowMins) <= 30
+	return enrichBookingWith(b, openCache{}, time.Now())
+}
+
+func enrichBookingWith(b models.Booking, oc openCache, now time.Time) BookingWithComputed {
+	open := oc.get(b.StoreID, b.BookingDate)
+	b.Status = computeStatusAt(b, open, now)
+	_, end := utils.SessionWindow(b.BookingDate, b.StartTime, b.EndTime, open)
+	isEndingSoon := b.Status == "ongoing" && end.Sub(now) <= 30*time.Minute
 	return BookingWithComputed{Booking: b, IsEndingSoon: isEndingSoon}
 }
 
@@ -104,8 +100,9 @@ func GetAllBookings(filter dto.BookingFilter) ([]BookingWithComputed, int64, err
 	}
 
 	result := make([]BookingWithComputed, 0, len(bookings))
+	oc, now := openCache{}, time.Now()
 	for _, b := range bookings {
-		result = append(result, enrichBooking(b))
+		result = append(result, enrichBookingWith(b, oc, now))
 	}
 	return result, total, nil
 }
@@ -128,20 +125,25 @@ func CreateBooking(req dto.CreateBookingRequest, createdBy string) (*BookingWith
 		return nil, errors.New("format booking_date tidak valid (YYYY-MM-DD)")
 	}
 
-	// 2. Cek overlap — tidak boleh ada booking lain di room yg sama, atau event booking
-	// yang memblokir seluruh store, pada slot yang sama.
+	// Durasi selalu dihitung server — duration_hours dari request diabaikan.
+	durationHours, err := durationFromRange(req.StartTime, req.EndTime)
+	if err != nil {
+		return nil, err
+	}
+
+	// 2. Cek overlap awal (dicek ulang di dalam transaction saat menyimpan).
 	hasOverlap, err := repository.CheckOverlap(req.RoomID, req.StoreID, req.BookingDate, req.StartTime, req.EndTime, "")
 	if err != nil {
 		return nil, errors.New("gagal mengecek ketersediaan slot")
 	}
 	if hasOverlap {
-		return nil, errors.New("slot waktu sudah terisi oleh booking atau event lain")
+		return nil, repository.ErrSlotTaken
 	}
 
-	// 3. Ambil room template ID untuk pricing engine
-	roomTemplateID, err := repository.GetRoomTemplateID(req.RoomID)
+	// 3. Room wajib milik store ini — kalau tidak, harga bisa diambil dari store lain.
+	roomTemplateID, err := repository.FindRoomTemplateInStore(req.RoomID, req.StoreID)
 	if err != nil {
-		return nil, errors.New("ruangan tidak ditemukan")
+		return nil, errors.New("ruangan tidak ditemukan di cabang ini")
 	}
 
 	// 4. Hitung harga dari pricing engine (FinalPrice sudah include flash discount)
@@ -162,25 +164,30 @@ func CreateBooking(req dto.CreateBookingRequest, createdBy string) (*BookingWith
 	var voucherID *string
 	var voucherCodeStr *string
 
-	// 5. Validasi voucher (opsional, hanya untuk member)
-	if req.VoucherCode != "" && req.CustomerID != "" {
-		customer, cErr := customerRepo.FindCustomerByID(req.CustomerID)
-		if cErr == nil && customer.Type == "member" {
-			vResult, vErr := voucherService.ValidateVoucher(voucherDto.ValidateVoucherRequest{
-				Code:           req.VoucherCode,
-				CustomerID:     req.CustomerID,
-				StoreID:        req.StoreID,
-				Amount:         basePrice,
-				UseType:        "booking",
-				RoomTemplateID: roomTemplateID,
-			})
-			if vErr == nil && vResult.IsValid {
-				discountAmount = vResult.DiscountAmount
-				voucherID = &vResult.VoucherID
-				code := req.VoucherCode
-				voucherCodeStr = &code
-			}
+	// 5. Validasi voucher (opsional). Kode yang tidak valid → error, bukan
+	// diam-diam diabaikan. Cek member ada di ValidateVoucher.
+	if req.VoucherCode != "" {
+		if req.CustomerID == "" {
+			return nil, errors.New("voucher hanya bisa dipakai oleh customer terdaftar")
 		}
+		vResult, vErr := voucherService.ValidateVoucher(voucherDto.ValidateVoucherRequest{
+			Code:           req.VoucherCode,
+			CustomerID:     req.CustomerID,
+			StoreID:        req.StoreID,
+			Amount:         basePrice,
+			UseType:        "booking",
+			RoomTemplateID: roomTemplateID,
+		})
+		if vErr != nil {
+			return nil, vErr
+		}
+		if !vResult.IsValid {
+			return nil, errors.New(vResult.Message)
+		}
+		discountAmount = vResult.DiscountAmount
+		voucherID = &vResult.VoucherID
+		code := req.VoucherCode
+		voucherCodeStr = &code
 	}
 
 	// 6. Validasi play credits (jika payment_method = 'play_credits')
@@ -192,12 +199,8 @@ func CreateBooking(req dto.CreateBookingRequest, createdBy string) (*BookingWith
 		if cErr != nil {
 			return nil, errors.New("play credits tidak ditemukan")
 		}
-		if credit.RemainingHours < req.DurationHours {
-			return nil, fmt.Errorf("sisa jam credits (%.1f jam) tidak cukup untuk booking ini (%.1f jam)",
-				credit.RemainingHours, req.DurationHours)
-		}
-		if time.Now().After(credit.ExpiresAt) {
-			return nil, errors.New("play credits sudah kadaluwarsa")
+		if err := checkCreditUsable(credit, req.CustomerID, req.StoreID, durationHours, time.Now()); err != nil {
+			return nil, err
 		}
 	}
 
@@ -255,7 +258,7 @@ func CreateBooking(req dto.CreateBookingRequest, createdBy string) (*BookingWith
 		BookingDate:      bookingDate,
 		StartTime:        req.StartTime,
 		EndTime:          req.EndTime,
-		DurationHours:    req.DurationHours,
+		DurationHours:    durationHours,
 		PriceBreakdown:   &breakdownStr,
 		BasePrice:        basePrice,
 		DiscountAmount:   discountAmount,
@@ -269,73 +272,75 @@ func CreateBooking(req dto.CreateBookingRequest, createdBy string) (*BookingWith
 		CreatedBy:        &createdBy,
 	}
 
-	if err := repository.CreateBooking(booking); err != nil {
+	// 11. Simpan booking + potong credits + pakai voucher secara atomik.
+	var deduct *repository.CreditDeduction
+	if playCreditID != nil {
+		deduct = &repository.CreditDeduction{CreditID: *playCreditID, Hours: durationHours}
+	}
+	var usage *models.VoucherUsage
+	if voucherID != nil {
+		usage = &models.VoucherUsage{VoucherID: *voucherID, CustomerID: req.CustomerID, DiscountAmount: discountAmount}
+	}
+	if err := repository.CreateBookingAtomic(booking, deduct, usage); err != nil {
+		switch {
+		case errors.Is(err, repository.ErrSlotTaken),
+			errors.Is(err, repository.ErrCreditInsufficient),
+			errors.Is(err, repository.ErrVoucherUsed):
+			return nil, err
+		}
+		log.Printf("[Booking] gagal membuat booking: %v", err)
 		return nil, errors.New("gagal membuat booking")
 	}
 
-	// 11. Deduct play credits (goroutine)
-	if req.PaymentMethod == "play_credits" && req.PlayCreditID != "" {
-		creditID := req.PlayCreditID
-		duration := req.DurationHours
-		go func() {
-			if err := creditsRepo.DeductHours(creditID, duration); err != nil {
-				log.Printf("[Booking] Gagal deduct credits %s: %v", creditID, err)
-			}
-		}()
-	}
-
-	// 12. Redeem voucher jika dipakai
-	if voucherID != nil && req.CustomerID != "" {
-		vid := *voucherID
-		cid := req.CustomerID
-		bid := booking.ID
-		disc := discountAmount
-		go func() {
-			if err := voucherService.RedeemVoucher(vid, cid, bid, disc); err != nil {
-				log.Printf("[Booking] Gagal redeem voucher %s: %v", vid, err)
-			}
-		}()
-	}
-
 	// 13. Kirim notifikasi ke customer (async)
-	go sendBookingNotification(booking)
+	utils.SafeGo(func() { sendBookingNotification(booking) })
 
 	return GetBookingByID(booking.ID)
 }
 
-// CancelBooking membatalkan booking dengan alasan wajib.
+// checkCancellable: hanya booking yang BELUM mulai yang boleh dibatalkan.
+// Status di DB bisa masih "upcoming" untuk booking yang sudah lewat (status
+// dihitung saat dibaca), jadi yang dipakai adalah status terhitung.
+func checkCancellable(b models.Booking, openMins int, now time.Time) error {
+	switch computeStatusAt(b, openMins, now) {
+	case "upcoming":
+		return nil
+	case "cancelled":
+		return errors.New("booking sudah dibatalkan")
+	case "ongoing":
+		return errors.New("booking sedang berjalan, tidak bisa dibatalkan")
+	default:
+		return errors.New("booking sudah selesai, tidak bisa dibatalkan")
+	}
+}
+
+// isPaidOnline: booking dari customer app (dibuat oleh webhook Xendit) disimpan
+// dengan payment_method "cash" dan created_by = customer_id.
+func isPaidOnline(b *models.Booking) bool {
+	return b.CreatedBy != nil && b.CustomerID != nil && *b.CreatedBy == *b.CustomerID
+}
+
+// CancelBooking membatalkan booking dengan alasan wajib. Pembatalan, pengembalian
+// jam play credits, dan pelepasan voucher terjadi dalam 1 transaction.
 func CancelBooking(id string, req dto.CancelBookingRequest, cancelledBy string) (*BookingWithComputed, error) {
 	b, err := repository.FindBookingByID(id)
 	if err != nil {
 		return nil, errors.New("booking tidak ditemukan")
 	}
-	if b.Status == "cancelled" {
-		return nil, errors.New("booking sudah dibatalkan")
-	}
-	if b.Status == "completed" {
-		return nil, errors.New("booking sudah selesai, tidak bisa dibatalkan")
+	if err := checkCancellable(*b, storeOpenMins(b.StoreID, b.BookingDate), time.Now()); err != nil {
+		return nil, err
 	}
 
-	now := time.Now()
-	b.Status = "cancelled"
-	b.CancelReason = &req.Reason
-	b.CancelledAt = &now
-	b.CancelledBy = &cancelledBy
-
-	// Kembalikan jam play credits jika booking pakai credits
-	if b.PaymentMethod == "play_credits" && b.PlayCreditID != nil {
-		creditID := *b.PlayCreditID
-		duration := b.DurationHours
-		go func() {
-			// Deduct negatif = kembalikan jam
-			if err := creditsRepo.DeductHours(creditID, -duration); err != nil {
-				log.Printf("[Booking] Gagal refund credits %s: %v", creditID, err)
-			}
-		}()
-	}
-
-	if err := repository.UpdateBooking(b); err != nil {
+	if err := repository.CancelBookingAtomic(b, req.Reason, cancelledBy); err != nil {
+		if errors.Is(err, repository.ErrAlreadyFinal) {
+			return nil, errors.New("booking sudah dibatalkan atau selesai")
+		}
+		log.Printf("[Booking] gagal membatalkan %s: %v", b.ID, err)
 		return nil, errors.New("gagal membatalkan booking")
+	}
+	if isPaidOnline(b) {
+		// Refund Xendit belum otomatis — tandai di log untuk diproses manual.
+		log.Printf("[REFUND MANUAL] booking %s (%s) dibatalkan; dibayar online Rp %.0f", b.BookingCode, b.ID, b.TotalPrice)
 	}
 	return GetBookingByID(b.ID)
 }
@@ -416,8 +421,9 @@ func GetDashboard(filter dto.DashboardFilter) (*DashboardData, error) {
 
 	// Map bookings ke room-nya
 	bookingMap := make(map[string][]BookingWithComputed)
+	oc, now := openCache{}, time.Now()
 	for _, b := range bookings {
-		enriched := enrichBooking(b)
+		enriched := enrichBookingWith(b, oc, now)
 		bookingMap[b.RoomID] = append(bookingMap[b.RoomID], enriched)
 	}
 
@@ -455,8 +461,9 @@ func GetSessionsEndingSoon(storeID string) ([]BookingWithComputed, error) {
 		return nil, err
 	}
 	result := make([]BookingWithComputed, 0, len(bookings))
+	oc, now := openCache{}, time.Now()
 	for _, b := range bookings {
-		result = append(result, enrichBooking(b))
+		result = append(result, enrichBookingWith(b, oc, now))
 	}
 	return result, nil
 }

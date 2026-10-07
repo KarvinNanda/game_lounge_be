@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go test *)",
+      "Bash(go build *)",
+      "Bash(go vet *)",
+      "Bash(./scratch_server.exe)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8080/health)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" -X POST http://localhost:8080/api/upload)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:8080/api/roles -H \"Authorization: Bearer token.palsu.abc\")",
+      "Bash(taskkill //F //IM scratch_server.exe)",
+      "Bash(rm -f scratch_server.exe)",
+      "Bash(ALLOWED_ORIGINS=\"https://app.example.com\" COOKIE_SECURE=false ./scratch_server.exe)",
+      "Bash(rm -f C:/Users/karvi/AppData/Local/Temp/claude/D--KV-game-lounge-be/4aa8b251-5c2a-404d-8260-040c7426b902/scratchpad/tokens.txt)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8099/health)",
+      "Bash(rm -f scratch_server.exe C:/Users/karvi/AppData/Local/Temp/claude/D--KV-game-lounge-be/4aa8b251-5c2a-404d-8260-040c7426b902/scratchpad/stok.txt)"
+    ]
+  }
+}

@@ -14,9 +14,9 @@ type StoreFlashSale struct {
 	PricePerHour   float64    `gorm:"type:decimal(12,2);not null;default:0" json:"price_per_hour"`
 	DateFrom       time.Time  `gorm:"type:date;not null" json:"date_from"`
 	DateTo         time.Time  `gorm:"type:date;not null" json:"date_to"`
-	TimeFrom       string     `gorm:"type:time;not null" json:"time_from"`
-	TimeTo         string     `gorm:"type:time;not null" json:"time_to"`
-	IsActive       bool       `gorm:"default:true" json:"is_active"`
+	TimeFrom       string     `gorm:"type:time(0);not null" json:"time_from"`
+	TimeTo         string     `gorm:"type:time(0);not null" json:"time_to"`
+	IsActive       bool       `json:"is_active"`
 	CreatedBy      *string    `gorm:"size:255" json:"created_by"`
 	UpdatedBy      *string    `gorm:"size:255" json:"updated_by"`
 	DeletedBy      *string    `gorm:"size:255" json:"deleted_by"`

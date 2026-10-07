@@ -1,12 +1,19 @@
 package repository
 
 import (
+	"errors"
+	"sort"
 	"fmt"
 	"time"
 
 	"game_lounge_be/config"
 	"game_lounge_be/models"
+	customerBookingRepo "game_lounge_be/modules/customer_booking/repository"
 	eventRepo "game_lounge_be/modules/event_booking/repository"
+	"game_lounge_be/utils"
+
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // ── Sequence ──────────────────────────────────────────────────────────────────
@@ -17,21 +24,28 @@ func EnsureSequenceExists() {
 }
 
 // GetNextSequence mengambil dan increment global counter secara atomik.
+// LAST_INSERT_ID(expr) menyimpan nilai baru per-koneksi, dan transaction
+// memastikan UPDATE & SELECT memakai koneksi yang sama. Versi lama membaca
+// ulang tabel di koneksi lain, sehingga 2 request bisa mendapat nomor sama.
 func GetNextSequence() (uint, error) {
-	result := config.DB.Exec("UPDATE booking_sequences SET last_sequence = last_sequence + 1 WHERE id = 1")
-	if result.Error != nil {
-		return 0, result.Error
-	}
-	if result.RowsAffected == 0 {
-		// Baris belum ada, init dulu
-		EnsureSequenceExists()
-		config.DB.Exec("UPDATE booking_sequences SET last_sequence = last_sequence + 1 WHERE id = 1")
-	}
-	var seq models.BookingSequence
-	if err := config.DB.First(&seq, 1).Error; err != nil {
-		return 0, err
-	}
-	return seq.LastSequence, nil
+	var seq uint
+	err := config.DB.Transaction(func(tx *gorm.DB) error {
+		res := tx.Exec("UPDATE booking_sequences SET last_sequence = LAST_INSERT_ID(last_sequence + 1) WHERE id = 1")
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			// Baris belum ada: buat lalu increment.
+			if err := tx.Exec("INSERT IGNORE INTO booking_sequences (id, last_sequence) VALUES (1, 0)").Error; err != nil {
+				return err
+			}
+			if err := tx.Exec("UPDATE booking_sequences SET last_sequence = LAST_INSERT_ID(last_sequence + 1) WHERE id = 1").Error; err != nil {
+				return err
+			}
+		}
+		return tx.Raw("SELECT LAST_INSERT_ID()").Scan(&seq).Error
+	})
+	return seq, err
 }
 
 // jakartaLoc mengembalikan timezone Asia/Jakarta.
@@ -52,13 +66,6 @@ func GenerateBookingCode() (string, error) {
 	}
 	dateStr := time.Now().In(jakartaLoc()).Format("060102")
 	return fmt.Sprintf("BK-%s-%04d", dateStr, seq), nil
-}
-
-// GetRoomTemplateID mengambil room_template_id dari store_room berdasarkan room ID.
-func GetRoomTemplateID(roomID string) (uint, error) {
-	var room models.StoreRoom
-	err := config.DB.Select("room_template_id").Where("id = ?", roomID).First(&room).Error
-	return room.RoomTemplateID, err
 }
 
 // ── Booking CRUD ──────────────────────────────────────────────────────────────
@@ -153,83 +160,174 @@ func FindRoomsForStore(storeID string) ([]models.StoreRoom, error) {
 
 // ── Overlap Check ─────────────────────────────────────────────────────────────
 
-// CheckOverlap memvalidasi apakah slot waktu sudah terisi booking lain.
-// Overlap: newStart < existEnd AND newEnd > existStart.
-// Selain mengecek regular booking per room, juga mengecek event booking
-// yang memblokir seluruh store pada slot yang sama.
+// CheckOverlap mengecek apakah slot di room sudah terpakai oleh booking aktif,
+// hold customer yang belum expire, atau event booking yang memblokir store.
+// Jam dinormalisasi relatif ke jam buka store (lihat NormalizeRange) supaya
+// sesi lintas tengah malam terdeteksi.
 func CheckOverlap(roomID, storeID, bookingDate, startTime, endTime, excludeID string) (bool, error) {
-	startMins := parseTimeToMinutes(startTime)
-	endMins := parseTimeToMinutes(endTime)
-	if endMins <= startMins {
-		endMins += 24 * 60 // lintas tengah malam
+	return overlapIn(config.DB, roomID, storeID, bookingDate, startTime, endTime, excludeID)
+}
+
+func overlapIn(db *gorm.DB, roomID, storeID, bookingDate, startTime, endTime, excludeID string) (bool, error) {
+	openMins, _ := customerBookingRepo.OperatingWindow(storeID, bookingDate)
+	newStart, newEnd := utils.NormalizeRange(startTime, endTime, openMins)
+	overlaps := func(s, e string) bool {
+		es, ee := utils.NormalizeRange(s, e, openMins)
+		return newStart < ee && newEnd > es
 	}
 
-	// 1. Cek regular booking di room yang sama
-	var existingBookings []models.Booking
-	query := config.DB.Where("room_id = ? AND booking_date = ? AND status != 'cancelled'", roomID, bookingDate)
+	// 1. Booking aktif di room yang sama
+	var existing []models.Booking
+	q := db.Where("room_id = ? AND booking_date = ? AND status != 'cancelled'", roomID, bookingDate)
 	if excludeID != "" {
-		query = query.Where("id != ?", excludeID)
+		q = q.Where("id != ?", excludeID)
 	}
-	if err := query.Find(&existingBookings).Error; err != nil {
+	if err := q.Find(&existing).Error; err != nil {
 		return false, err
 	}
-
-	for _, b := range existingBookings {
-		eStart := parseTimeToMinutes(b.StartTime)
-		eEnd := parseTimeToMinutes(b.EndTime)
-		if eEnd <= eStart {
-			eEnd += 24 * 60
-		}
-		if startMins < eEnd && endMins > eStart {
+	for _, b := range existing {
+		if overlaps(b.StartTime, b.EndTime) {
 			return true, nil
 		}
 	}
 
-	// 2. Cek event booking yang memblokir seluruh store
+	// 2. Hold customer yang sedang menunggu pembayaran
+	var holds []models.BookingHold
+	if err := db.Where("room_id = ? AND booking_date = ? AND expires_at > ?", roomID, bookingDate, time.Now()).
+		Find(&holds).Error; err != nil {
+		return false, err
+	}
+	for _, h := range holds {
+		if overlaps(h.StartTime, h.EndTime) {
+			return true, nil
+		}
+	}
+
+	// 3. Event booking yang memblokir seluruh store
 	if storeID != "" {
-		hasEvent, _ := eventRepo.CheckOverlapWithEvent(storeID, bookingDate, startTime, endTime, "")
+		hasEvent, err := eventRepo.CheckOverlapWithEvent(storeID, bookingDate, startTime, endTime, "")
+		if err != nil {
+			return false, err
+		}
 		if hasEvent {
 			return true, nil
 		}
 	}
-
 	return false, nil
 }
 
-// parseTimeToMinutes mengubah "HH:MM" atau "HH:MM:SS" menjadi total menit dari 00:00.
-func parseTimeToMinutes(t string) int {
-	if len(t) < 5 {
-		return 0
-	}
-	h := int(t[0]-'0')*10 + int(t[1]-'0')
-	m := int(t[3]-'0')*10 + int(t[4]-'0')
-	return h*60 + m
+var (
+	ErrSlotTaken          = errors.New("slot waktu sudah terisi oleh booking atau event lain")
+	ErrCreditInsufficient = errors.New("sisa jam play credits tidak cukup")
+	ErrVoucherUsed        = errors.New("voucher sudah pernah digunakan customer ini")
+)
+
+// CreditDeduction = potongan jam play credits yang dilakukan bersama booking.
+type CreditDeduction struct {
+	CreditID string
+	Hours    float64
+}
+
+// CreateBookingAtomic menyimpan booking + potongan credits + pemakaian voucher
+// dalam 1 transaction. Baris room dikunci (FOR UPDATE) lalu overlap dicek ulang,
+// sehingga 2 admin tidak bisa membooking slot yang sama bersamaan.
+// Potongan credits memakai guard remaining_hours >= jam → saldo tidak bisa negatif.
+func CreateBookingAtomic(b *models.Booking, deduct *CreditDeduction, usage *models.VoucherUsage) error {
+	return config.DB.Transaction(func(tx *gorm.DB) error {
+		var room models.StoreRoom
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", b.RoomID).First(&room).Error; err != nil {
+			return err
+		}
+		taken, err := overlapIn(tx, b.RoomID, b.StoreID, b.BookingDate.Format("2006-01-02"), b.StartTime, b.EndTime, "")
+		if err != nil {
+			return err
+		}
+		if taken {
+			return ErrSlotTaken
+		}
+		if err := tx.Create(b).Error; err != nil {
+			return err
+		}
+		if deduct != nil {
+			res := tx.Model(&models.CustomerPlayCredit{}).
+				Where("id = ? AND remaining_hours >= ? AND is_active = true AND deleted_at IS NULL AND expires_at > ?",
+					deduct.CreditID, deduct.Hours, time.Now()).
+				Update("remaining_hours", gorm.Expr("remaining_hours - ?", deduct.Hours))
+			if res.Error != nil {
+				return res.Error
+			}
+			if res.RowsAffected != 1 {
+				return ErrCreditInsufficient
+			}
+		}
+		if usage != nil {
+			usage.BookingID = &b.ID
+			if err := tx.Create(usage).Error; err != nil {
+				if utils.IsDuplicateKey(err) {
+					return ErrVoucherUsed
+				}
+				return err
+			}
+			if err := tx.Model(&models.Voucher{}).Where("id = ?", usage.VoucherID).
+				Update("used_count", gorm.Expr("used_count + 1")).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// FindRoomTemplateInStore mengembalikan room_template_id jika room aktif dan milik store.
+func FindRoomTemplateInStore(roomID, storeID string) (uint, error) {
+	var room models.StoreRoom
+	err := config.DB.Select("room_template_id").
+		Where("id = ? AND store_id = ? AND is_active = true AND deleted_at IS NULL", roomID, storeID).
+		First(&room).Error
+	return room.RoomTemplateID, err
 }
 
 // ── Sessions Ending Soon ──────────────────────────────────────────────────────
 
-// FindSessionsEndingSoon mengambil sesi yang akan berakhir dalam X menit ke depan (default 5).
+// FindSessionsEndingSoon mengambil sesi yang berakhir dalam X menit ke depan (default 5).
+// Booking kemarin ikut dicek: sesi 23:00–02:00 tercatat di tanggal kemarin.
 func FindSessionsEndingSoon(storeID string, withinMinutes int) ([]models.Booking, error) {
 	if withinMinutes <= 0 {
 		withinMinutes = 5
 	}
-	now := time.Now().In(jakartaLoc())
-	today := now.Format("2006-01-02")
-	nowTime := now.Format("15:04:05")
-	endLimit := now.Add(time.Duration(withinMinutes) * time.Minute).Format("15:04:05")
+	now := time.Now()
+	today := now.In(jakartaLoc())
+	limit := now.Add(time.Duration(withinMinutes) * time.Minute)
 
-	var bookings []models.Booking
+	var candidates []models.Booking
 	query := config.DB.
 		Preload("Room.RoomTemplate").
-		Where("booking_date = ? AND status IN ('upcoming','ongoing')", today).
-		Where("end_time > ? AND end_time <= ?", nowTime, endLimit)
-
+		Where("booking_date IN ? AND status IN ('upcoming','ongoing')",
+			[]string{today.AddDate(0, 0, -1).Format("2006-01-02"), today.Format("2006-01-02")})
 	if storeID != "" {
 		query = query.Where("store_id = ?", storeID)
 	}
+	if err := query.Find(&candidates).Error; err != nil {
+		return nil, err
+	}
 
-	err := query.Order("end_time ASC").Find(&bookings).Error
-	return bookings, err
+	opens := map[string]int{}
+	var result []models.Booking
+	for _, b := range candidates {
+		key := b.StoreID + "|" + b.BookingDate.Format("2006-01-02")
+		if _, ok := opens[key]; !ok {
+			opens[key], _ = customerBookingRepo.OperatingWindow(b.StoreID, b.BookingDate.Format("2006-01-02"))
+		}
+		_, end := utils.SessionWindow(b.BookingDate, b.StartTime, b.EndTime, opens[key])
+		if end.After(now) && !end.After(limit) {
+			result = append(result, b)
+		}
+	}
+	sort.Slice(result, func(i, j int) bool {
+		_, ei := utils.SessionWindow(result[i].BookingDate, result[i].StartTime, result[i].EndTime, opens[result[i].StoreID+"|"+result[i].BookingDate.Format("2006-01-02")])
+		_, ej := utils.SessionWindow(result[j].BookingDate, result[j].StartTime, result[j].EndTime, opens[result[j].StoreID+"|"+result[j].BookingDate.Format("2006-01-02")])
+		return ei.Before(ej)
+	})
+	return result, nil
 }
 
 // ── Available Credits ─────────────────────────────────────────────────────────
@@ -261,34 +359,87 @@ func FindAvailableCreditsForBooking(customerID, storeID, bookingDate string, dur
 
 // ── Status Auto-Update ────────────────────────────────────────────────────────
 
-// BatchUpdateStatus memperbarui status booking berdasarkan waktu Jakarta saat ini.
-// Dipanggil saat load dashboard untuk menjaga konsistensi DB.
+// BatchUpdateStatus memperbarui status booking berdasarkan waktu WIB saat ini.
+// Dipanggil saat load dashboard untuk menjaga konsistensi DB. Status dihitung
+// di Go dengan waktu absolut (utils.SessionStatus): perbandingan jam di SQL
+// tidak bisa menangani sesi lintas tengah malam.
 func BatchUpdateStatus(storeID string) error {
-	now := time.Now().In(jakartaLoc())
-	nowTime := now.Format("15:04:05")
+	now := time.Now()
+	today := now.In(jakartaLoc()).Format("2006-01-02")
 
-	// upcoming → ongoing: booking_date = today AND start <= now AND end > now
-	config.DB.Model(&models.Booking{}).
-		Where("store_id = ? AND booking_date = CURDATE() AND status = 'upcoming' AND start_time <= ? AND end_time > ?",
-			storeID, nowTime, nowTime).
-		Update("status", "ongoing")
-
-	// ongoing → completed: booking_date = today AND end <= now
-	config.DB.Model(&models.Booking{}).
-		Where("store_id = ? AND booking_date = CURDATE() AND status = 'ongoing' AND end_time <= ?",
-			storeID, nowTime).
-		Update("status", "completed")
-
-	// upcoming → completed: booking_date < today (terlewat)
-	config.DB.Model(&models.Booking{}).
-		Where("store_id = ? AND booking_date < CURDATE() AND status = 'upcoming'", storeID).
-		Update("status", "completed")
-
+	var bookings []models.Booking
+	if err := config.DB.Select("id", "store_id", "booking_date", "start_time", "end_time", "status").
+		Where("store_id = ? AND status IN ('upcoming','ongoing') AND booking_date <= ?", storeID, today).
+		Find(&bookings).Error; err != nil {
+		return err
+	}
+	opens := map[string]int{}
+	for _, b := range bookings {
+		date := b.BookingDate.Format("2006-01-02")
+		if _, ok := opens[date]; !ok {
+			opens[date], _ = customerBookingRepo.OperatingWindow(storeID, date)
+		}
+		next := utils.SessionStatus(b.Status, b.BookingDate, b.StartTime, b.EndTime, opens[date], now)
+		if next == b.Status {
+			continue
+		}
+		// Bersyarat pada status lama: tidak menimpa pembatalan yang terjadi bersamaan.
+		if err := config.DB.Model(&models.Booking{}).Where("id = ? AND status = ?", b.ID, b.Status).
+			Update("status", next).Error; err != nil {
+			return err
+		}
+	}
 	return nil
 }
-
 
 // GetRoomNameByID mengambil nama room berdasarkan ID, dipakai oleh notification service.
 func GetRoomNameByID(roomID string, name *string) {
 	config.DB.Table("store_rooms").Select("name").Where("id = ?", roomID).Scan(name)
+}
+
+// ErrAlreadyFinal: booking sudah cancelled/completed saat akan dibatalkan.
+var ErrAlreadyFinal = errors.New("booking sudah final")
+
+// CancelBookingAtomic membatalkan booking, mengembalikan jam play credits, dan
+// melepas voucher dalam 1 transaction. Booking "diklaim" dengan UPDATE bersyarat,
+// jadi 2 pembatalan bersamaan tidak mengembalikan credits 2 kali.
+func CancelBookingAtomic(b *models.Booking, reason, cancelledBy string) error {
+	return config.DB.Transaction(func(tx *gorm.DB) error {
+		claim := tx.Model(&models.Booking{}).
+			Where("id = ? AND status NOT IN ('cancelled','completed')", b.ID).
+			Updates(map[string]interface{}{
+				"status":        "cancelled",
+				"cancel_reason": reason,
+				"cancelled_at":  time.Now(),
+				"cancelled_by":  cancelledBy,
+				"updated_by":    cancelledBy,
+			})
+		if claim.Error != nil {
+			return claim.Error
+		}
+		if claim.RowsAffected != 1 {
+			return ErrAlreadyFinal
+		}
+
+		if b.PaymentMethod == "play_credits" && b.PlayCreditID != nil {
+			if err := tx.Model(&models.CustomerPlayCredit{}).Where("id = ?", *b.PlayCreditID).
+				Update("remaining_hours", gorm.Expr("remaining_hours + ?", b.DurationHours)).Error; err != nil {
+				return err
+			}
+		}
+
+		if b.VoucherID != nil {
+			res := tx.Where("voucher_id = ? AND booking_id = ?", *b.VoucherID, b.ID).Delete(&models.VoucherUsage{})
+			if res.Error != nil {
+				return res.Error
+			}
+			if res.RowsAffected > 0 {
+				if err := tx.Model(&models.Voucher{}).Where("id = ? AND used_count > 0", *b.VoucherID).
+					Update("used_count", gorm.Expr("used_count - 1")).Error; err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
 }

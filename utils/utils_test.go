@@ -1,72 +1,34 @@
 package utils
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
-// ── GeneratePasswordFromName ──────────────────────────────────
+// ── GenerateRandomPassword ────────────────────────────────────
 
-func TestGeneratePasswordFromName_SubstitusiKarakter(t *testing.T) {
-	cases := []struct {
-		name string
-		want string
-	}{
-		// Huruf PERTAMA selalu uppercase (bukan disubstitusi), sisanya disubstitusi
-		// 'i' → '1'
-		{"Budi Santoso", "Bud1#Gl"},
-		// 'A' (huruf pertama) → kapital 'A'; ndre → n,d,r,'e'→'3'
-		{"Andre", "Andr3#Gl"},
-		// 'S' (huruf pertama) → kapital 'S'; anti → '@','n','7','1'
-		{"Santi", "S@n71#Gl"},
-		// 'R' kapital; atna → '@','7','n','@'
-		{"Ratna", "R@7n@#Gl"},
-		// nama kosong → fallback
-		{"", "GameLounge#1"},
-		// 'T' kapital; es → '3','$'
-		{"tes", "T3$#Gl"},
-	}
-	for _, c := range cases {
-		got := GeneratePasswordFromName(c.name)
-		if got != c.want {
-			t.Errorf("GeneratePasswordFromName(%q) = %q, want %q", c.name, got, c.want)
+func TestGenerateRandomPassword_PanjangDanAlfabet(t *testing.T) {
+	for i := 0; i < 50; i++ {
+		p := GenerateRandomPassword()
+		if len(p) != 14 {
+			t.Fatalf("panjang harus 14, got %d (%q)", len(p), p)
+		}
+		for _, ch := range p {
+			if !strings.ContainsRune(passwordAlphabet, ch) {
+				t.Fatalf("karakter %q di luar alfabet", ch)
+			}
 		}
 	}
 }
 
-func TestGeneratePasswordFromName_HanyaAmbilKataPertama(t *testing.T) {
-	// Nama dengan banyak kata → hanya kata pertama yang diproses
-	got := GeneratePasswordFromName("Ahmad Budi Santoso")
-	want := GeneratePasswordFromName("Ahmad")
-	if got != want {
-		t.Errorf("nama multi-kata: got %q, want %q", got, want)
-	}
-}
-
-func TestGeneratePasswordFromName_SuffixSelalu(t *testing.T) {
-	// Setiap nama selalu diakhiri "#Gl"
-	names := []string{"Citra", "Doni", "XYZ"}
-	for _, name := range names {
-		got := GeneratePasswordFromName(name)
-		if len(got) < 3 {
-			t.Errorf("hasil terlalu pendek untuk nama %q: %q", name, got)
+func TestGenerateRandomPassword_TidakBerulang(t *testing.T) {
+	seen := map[string]bool{}
+	for i := 0; i < 200; i++ {
+		p := GenerateRandomPassword()
+		if seen[p] {
+			t.Fatalf("password berulang: %q", p)
 		}
-		suffix := got[len(got)-3:]
-		if suffix != "#Gl" {
-			t.Errorf("GeneratePasswordFromName(%q) = %q, suffix harus '#Gl'", name, got)
-		}
-	}
-}
-
-func TestGeneratePasswordFromName_HurufPertamaKapital(t *testing.T) {
-	// Huruf pertama output selalu kapital
-	cases := []string{"budi", "santi", "rizki"}
-	for _, name := range cases {
-		got := GeneratePasswordFromName(name)
-		if len(got) == 0 {
-			t.Fatal("output kosong")
-		}
-		first := rune(got[0])
-		if first < 'A' || first > 'Z' {
-			t.Errorf("GeneratePasswordFromName(%q) = %q: huruf pertama harus kapital", name, got)
-		}
+		seen[p] = true
 	}
 }
 

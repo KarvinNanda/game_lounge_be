@@ -163,7 +163,7 @@ func GetSalesSummary(filter dto.SalesFilter) (*dto.SalesSummaryResponse, error) 
 		},
 	}
 
-	revenueByBranch := repository.RevenueByBranch(curFrom, curTo)
+	revenueByBranch := repository.RevenueByBranch(curFrom, curTo, filter.StoreID)
 	revenueByRoomType := repository.RevenueByRoomType(curFrom, curTo, filter.StoreID)
 
 	// Pastikan slice tidak nil untuk JSON response

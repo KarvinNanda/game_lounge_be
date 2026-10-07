@@ -2,10 +2,13 @@ package service
 
 import (
 	"testing"
+	"time"
 
 	"game_lounge_be/config"
 	"game_lounge_be/models"
 	"game_lounge_be/modules/voucher/dto"
+
+	"github.com/google/uuid"
 )
 
 // ── ValidateVoucher ───────────────────────────────────────────
@@ -222,5 +225,46 @@ func TestValidateVoucher_NominalDiscount(t *testing.T) {
 	}
 	if resp.DiscountAmount != 50000 {
 		t.Errorf("discount nominal: want 50000, got %.0f", resp.DiscountAmount)
+	}
+}
+
+func TestValidateVoucher_BerakhirHariIni_MasihValid(t *testing.T) {
+	skipIfNoDB(t)
+	// end_date disimpan sebagai DATE (jam 00:00). Voucher harus berlaku sampai akhir hari itu.
+	v, cleanup := createTestVoucher("TST-ENDTODAY-001", "nominal", 10000, func(v *models.Voucher) {
+		y, m, d := time.Now().Date()
+		today := time.Date(y, m, d, 0, 0, 0, 0, time.Local)
+		v.EndDate = &today
+	})
+	defer cleanup()
+
+	resp, err := ValidateVoucher(dto.ValidateVoucherRequest{
+		Code: v.Code, StoreID: "any-store", CustomerID: testCustomerID, Amount: 100000, UseType: "booking",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resp.IsValid {
+		t.Errorf("voucher yang berakhir hari ini harus masih valid, got %q", resp.Message)
+	}
+}
+
+func TestValidateVoucher_CustomerRegular_Ditolak(t *testing.T) {
+	skipIfNoDB(t)
+	v, cleanup := createTestVoucher("TST-MEMBERONLY-001", "nominal", 10000)
+	defer cleanup()
+
+	regularID := uuid.NewString()
+	config.DB.Create(&models.Customer{ID: regularID, Name: "TEST Regular", Whatsapp: "08999000002", Type: "regular", Status: "active"})
+	defer config.DB.Unscoped().Delete(&models.Customer{}, "id = ?", regularID)
+
+	resp, err := ValidateVoucher(dto.ValidateVoucherRequest{
+		Code: v.Code, StoreID: "any-store", CustomerID: regularID, Amount: 100000, UseType: "booking",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.IsValid {
+		t.Error("voucher hanya untuk member — customer regular harus ditolak")
 	}
 }

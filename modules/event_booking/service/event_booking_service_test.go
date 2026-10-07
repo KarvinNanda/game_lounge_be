@@ -7,37 +7,6 @@ import (
 	"game_lounge_be/models"
 )
 
-// ── parseMins ──────────────────────────────────────────────────
-
-func TestParseMins_Normal(t *testing.T) {
-	cases := []struct {
-		input string
-		want  int
-	}{
-		{"00:00", 0},
-		{"01:00", 60},
-		{"08:30", 510},
-		{"16:00", 960},
-		{"23:59", 1439},
-	}
-	for _, c := range cases {
-		got := parseMins(c.input)
-		if got != c.want {
-			t.Errorf("parseMins(%q) = %d, want %d", c.input, got, c.want)
-		}
-	}
-}
-
-func TestParseMins_StringPendek(t *testing.T) {
-	// String < 5 karakter → 0
-	cases := []string{"", "1", "10:", "1:0"}
-	for _, s := range cases {
-		if got := parseMins(s); got != 0 {
-			t.Errorf("parseMins(%q) = %d, want 0", s, got)
-		}
-	}
-}
-
 // ── calculateTotalPrice ───────────────────────────────────────
 
 func TestCalculateTotalPrice_Proporsional(t *testing.T) {
@@ -106,66 +75,36 @@ func makeEventBooking(status, date, start, end string) models.EventBooking {
 	}
 }
 
-func jakartaNow() time.Time {
-	loc, err := time.LoadLocation("Asia/Jakarta")
-	if err != nil {
-		loc = time.UTC
-	}
-	return time.Now().In(loc)
+// Waktu "sekarang" & jam buka eksplisit supaya test tidak bergantung jam berjalan.
+// Store buka 09:00, tutup 02:00.
+const testOpen = 9 * 60
+
+func atWIB(date string, h, m int) time.Time {
+	loc, _ := time.LoadLocation("Asia/Jakarta")
+	d, _ := time.ParseInLocation("2006-01-02", date, loc)
+	return d.Add(time.Duration(h)*time.Hour + time.Duration(m)*time.Minute)
 }
 
-func TestComputeStatus_Cancelled(t *testing.T) {
-	b := makeEventBooking("cancelled", "2030-01-01", "10:00", "12:00")
-	if got := computeStatus(b); got != "cancelled" {
-		t.Errorf("want 'cancelled', got %q", got)
+func TestComputeStatus(t *testing.T) {
+	cases := []struct {
+		name string
+		b    models.EventBooking
+		now  time.Time
+		want string
+	}{
+		{"cancelled", makeEventBooking("cancelled", "2030-01-01", "10:00", "12:00"), atWIB("2030-01-01", 11, 0), "cancelled"},
+		{"completed", makeEventBooking("completed", "2030-01-01", "10:00", "12:00"), atWIB("2029-12-31", 9, 0), "completed"},
+		{"tanggal lampau", makeEventBooking("upcoming", "2030-01-01", "10:00", "22:00"), atWIB("2030-01-02", 23, 0), "completed"},
+		{"tanggal mendatang", makeEventBooking("upcoming", "2030-01-02", "10:00", "22:00"), atWIB("2030-01-01", 12, 0), "upcoming"},
+		{"hari ini selesai", makeEventBooking("upcoming", "2030-01-01", "10:00", "12:00"), atWIB("2030-01-01", 13, 0), "completed"},
+		{"hari ini belum mulai", makeEventBooking("upcoming", "2030-01-01", "20:00", "22:00"), atWIB("2030-01-01", 13, 0), "upcoming"},
+		{"full day 09:00–02:00, jam 01:00 besoknya masih berjalan", makeEventBooking("upcoming", "2030-01-01", "09:00", "02:00"), atWIB("2030-01-02", 1, 0), "ongoing"},
 	}
-}
-
-func TestComputeStatus_Completed(t *testing.T) {
-	b := makeEventBooking("completed", "2030-01-01", "10:00", "12:00")
-	if got := computeStatus(b); got != "completed" {
-		t.Errorf("want 'completed', got %q", got)
-	}
-}
-
-func TestComputeStatus_TanggalLampau(t *testing.T) {
-	yesterday := jakartaNow().AddDate(0, 0, -1).Format("2006-01-02")
-	b := makeEventBooking("upcoming", yesterday, "10:00", "22:00")
-	if got := computeStatus(b); got != "completed" {
-		t.Errorf("tanggal lampau: want 'completed', got %q", got)
-	}
-}
-
-func TestComputeStatus_TanggalMendatang(t *testing.T) {
-	tomorrow := jakartaNow().AddDate(0, 0, 1).Format("2006-01-02")
-	b := makeEventBooking("upcoming", tomorrow, "10:00", "22:00")
-	if got := computeStatus(b); got != "upcoming" {
-		t.Errorf("tanggal mendatang: want 'upcoming', got %q", got)
-	}
-}
-
-func TestComputeStatus_HariIni_SudahSelesai(t *testing.T) {
-	now := jakartaNow()
-	nowMins := now.Hour()*60 + now.Minute()
-	if nowMins < 2 {
-		t.Skip("skip: tes jalan terlalu dekat tengah malam")
-	}
-	todayStr := now.Format("2006-01-02")
-	b := makeEventBooking("upcoming", todayStr, "00:01", "00:02")
-	if got := computeStatus(b); got != "completed" {
-		t.Errorf("jam sudah lewat: want 'completed', got %q", got)
-	}
-}
-
-func TestComputeStatus_HariIni_BelumMulai(t *testing.T) {
-	now := jakartaNow()
-	nowMins := now.Hour()*60 + now.Minute()
-	if nowMins >= 23*60+50 {
-		t.Skip("skip: tes jalan terlalu malam (>= 23:50)")
-	}
-	todayStr := now.Format("2006-01-02")
-	b := makeEventBooking("upcoming", todayStr, "23:50", "23:59")
-	if got := computeStatus(b); got != "upcoming" {
-		t.Errorf("belum mulai: want 'upcoming', got %q", got)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := computeStatusAt(tc.b, testOpen, tc.now); got != tc.want {
+				t.Errorf("want %q, got %q", tc.want, got)
+			}
+		})
 	}
 }

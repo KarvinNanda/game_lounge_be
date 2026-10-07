@@ -40,6 +40,8 @@ Buat file `.env` di **root folder project** (sejajar dengan folder `cmd/`):
 ```env
 # App
 APP_PORT=8080
+COOKIE_SECURE=false          # dev lokal via http; production: hapus (default true)
+# APP_ENV=production         # production: server menolak start jika config keamanan kosong (lihat .env.example)
 
 # Database
 DB_HOST=127.0.0.1
@@ -49,7 +51,7 @@ DB_PASSWORD=your_password
 DB_NAME=game_lounge_db
 
 # JWT
-JWT_SECRET=your_super_secret_key
+JWT_SECRET=ganti_dengan_hasil_openssl_rand_hex_32   # minimal 32 karakter, server menolak secret pendek
 JWT_EXPIRED_HOURS=24
 
 # SMTP (untuk kirim email password customer & notifikasi)
@@ -70,7 +72,17 @@ SMTP_SENDER_NAME=Quantum Gaming Center # opsional — display name; fallback ke 
 CREATE DATABASE game_lounge_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 ```
 
-> Migrasi tabel dilakukan otomatis oleh GORM saat server pertama kali dijalankan, atau import SQL schema secara manual sesuai kebutuhan.
+Buat tabel (dari root project). Server **tidak** menjalankan migrasi otomatis:
+
+```bash
+go run ./cmd/migrate                      # buat/perbarui tabel dari models
+SEED_PASSWORD=... go run ./cmd/seed       # opsional: data contoh dev (5-10 baris per tabel)
+```
+
+Super admin pertama: set `SEED_ADMIN_USERNAME`, `SEED_ADMIN_EMAIL`, `SEED_ADMIN_PASSWORD` saat menjalankan `cmd/migrate`.
+DDL lengkap ada di `database/schema.sql`.
+
+> `cmd/migrate` hanya untuk dev. Jangan jalankan ke production — AutoMigrate bisa melakukan `ALTER` yang tidak diperlukan. Perubahan schema production dilakukan dengan SQL eksplisit.
 
 ### 5. Jalankan server
 

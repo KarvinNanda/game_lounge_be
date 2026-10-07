@@ -3,6 +3,8 @@ package config
 import (
 	"fmt"
 	"log"
+	"os"
+	"time"
 
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -22,7 +24,7 @@ func InitDB() {
 	)
 
 	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Info),
+		Logger: newDBLogger(),
 	})
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
@@ -30,4 +32,21 @@ func InitDB() {
 
 	DB = db
 	log.Println("Database connected successfully")
+}
+
+// newDBLogger: log level Info mencetak SEMUA SQL beserta nilainya (password hash,
+// token reset, data customer) ke stdout → ikut masuk log hosting. Default Warn,
+// dan nilai parameter tidak pernah dicetak. DB_LOG_LEVEL=info untuk debug lokal.
+func newDBLogger() logger.Interface {
+	level := logger.Warn
+	if GetEnv("DB_LOG_LEVEL", "") == "info" {
+		level = logger.Info
+	}
+	return logger.New(log.New(os.Stdout, "\r\n", log.LstdFlags), logger.Config{
+		SlowThreshold:             200 * time.Millisecond,
+		LogLevel:                  level,
+		IgnoreRecordNotFoundError: true,
+		ParameterizedQueries:      true,
+		Colorful:                  false,
+	})
 }
