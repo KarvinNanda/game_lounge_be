@@ -10,7 +10,7 @@ type FnbCategory struct {
 	ImageURL       *string    `gorm:"size:255" json:"image_url"`
 	MokaCategoryID *string    `gorm:"size:100;index" json:"moka_category_id"`
 	SortOrder      int        `gorm:"default:0" json:"sort_order"`
-	IsActive       bool       `gorm:"default:true" json:"is_active"`
+	IsActive       bool       `json:"is_active"`
 	CreatedBy      *string    `gorm:"size:255" json:"created_by"`
 	UpdatedBy      *string    `gorm:"size:255" json:"updated_by"`
 	CreatedAt      time.Time  `json:"created_at"`

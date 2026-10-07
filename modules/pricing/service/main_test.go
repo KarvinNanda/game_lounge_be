@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"testing"
-	"time"
 
 	"game_lounge_be/config"
 	"game_lounge_be/models"
@@ -143,18 +142,18 @@ func setupPricingFixtures() {
 
 // teardownPricingFixtures hapus semua data test yang dibuat di setupPricingFixtures.
 func teardownPricingFixtures() {
-	now := time.Now()
 	config.DB.Unscoped().Where("store_id = ?", testStoreID).Delete(&models.StoreHappyHourPrice{})
 	config.DB.Unscoped().Where("store_id = ?", testStoreID).Delete(&models.StoreHappyHourSchedule{})
 	config.DB.Unscoped().Where("store_id = ?", testStoreID).Delete(&models.StorePackagePrice{})
 	config.DB.Unscoped().Where("store_id = ?", testStoreID).Delete(&models.StorePricing{})
 	config.DB.Unscoped().Where("store_id = ?", testStoreID).Delete(&models.StoreFlashSale{})
-	config.DB.Unscoped().Where("store_id = ?", testStoreID).Delete(&models.Store{})
+	// stores tidak punya kolom store_id — dulu Where("store_id = ?") gagal diam-diam
+	// dan setiap run meninggalkan store "TEST ..." di DB dev.
+	config.DB.Unscoped().Delete(&models.Store{}, "id = ?", testStoreID)
 	if testRoomTplID > 0 {
 		config.DB.Unscoped().Delete(&models.RoomTemplate{}, testRoomTplID)
 	}
 	// Bersihkan global holiday test jika ada sisa
 	config.DB.Unscoped().Where("DATE(date) = ? AND name LIKE 'TEST%'", "2099-06-15").
 		Delete(&models.GlobalHolidaySchedule{})
-	_ = now
 }

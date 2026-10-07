@@ -6,9 +6,9 @@ type StoreOperatingHour struct {
 	ID        uint       `gorm:"primaryKey;autoIncrement" json:"id"`
 	StoreID   string     `gorm:"type:char(36);not null;index" json:"store_id"`
 	DayType   string     `gorm:"type:enum('weekday','weekend');not null" json:"day_type"`
-	OpenTime  string     `gorm:"type:time;not null" json:"open_time"`
-	CloseTime string     `gorm:"type:time;not null" json:"close_time"`
-	IsActive  bool       `gorm:"default:true" json:"is_active"`
+	OpenTime  string     `gorm:"type:time(0);not null" json:"open_time"`
+	CloseTime string     `gorm:"type:time(0);not null" json:"close_time"`
+	IsActive  bool       `json:"is_active"`
 	CreatedBy *string    `gorm:"size:255" json:"created_by"`
 	UpdatedBy *string    `gorm:"size:255" json:"updated_by"`
 	DeletedBy *string    `gorm:"size:255" json:"deleted_by"`

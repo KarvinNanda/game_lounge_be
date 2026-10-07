@@ -6,53 +6,6 @@ import (
 	"game_lounge_be/models"
 )
 
-// ── parseTimeToMinutes ────────────────────────────────────────
-
-func TestParseTimeToMinutes(t *testing.T) {
-	cases := []struct {
-		input string
-		want  int
-	}{
-		{"00:00", 0},
-		{"01:00", 60},
-		{"10:30", 630},
-		{"16:00", 960},
-		{"23:59", 1439},
-		{"00:00:00", 0},       // MySQL TIME format (HH:MM:SS)
-		{"10:30:00", 630},     // MySQL TIME with seconds
-		{"", 0},               // empty → 0
-	}
-	for _, c := range cases {
-		got := parseTimeToMinutes(c.input)
-		if got != c.want {
-			t.Errorf("parseTimeToMinutes(%q) = %d, want %d", c.input, got, c.want)
-		}
-	}
-}
-
-// ── minutesToTime ─────────────────────────────────────────────
-
-func TestMinutesToTime(t *testing.T) {
-	cases := []struct {
-		input int
-		want  string
-	}{
-		{0, "00:00"},
-		{60, "01:00"},
-		{630, "10:30"},
-		{960, "16:00"},
-		{1439, "23:59"},
-		{1440, "00:00"}, // wrap modulo 24h
-		{1500, "01:00"}, // 1440+60
-	}
-	for _, c := range cases {
-		got := minutesToTime(c.input)
-		if got != c.want {
-			t.Errorf("minutesToTime(%d) = %q, want %q", c.input, got, c.want)
-		}
-	}
-}
-
 // ── formatHours ───────────────────────────────────────────────
 
 func TestFormatHours(t *testing.T) {

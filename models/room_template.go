@@ -9,7 +9,7 @@ type RoomTemplate struct {
 	CapacityMax uint       `gorm:"not null" json:"capacity_max"`
 	Description *string    `gorm:"type:text" json:"description"`
 	ImageURL    *string    `gorm:"size:255" json:"image_url"`
-	IsActive    bool       `gorm:"default:true" json:"is_active"`
+	IsActive    bool       `json:"is_active"`
 	CreatedBy   *string    `gorm:"size:255" json:"created_by"`
 	UpdatedBy   *string    `gorm:"size:255" json:"updated_by"`
 	DeletedBy   *string    `gorm:"size:255" json:"deleted_by"`

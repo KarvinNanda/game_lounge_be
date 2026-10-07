@@ -42,7 +42,7 @@ func RequestReset(email, ip string) {
 	}
 
 	// 5. Kirim email dengan link reset (async, tidak blocking)
-	go sendResetEmail(staff.Email, staff.Username, token)
+	utils.SafeGo(func() { sendResetEmail(staff.Email, staff.Username, token) })
 }
 
 // ValidateToken memvalidasi token sebelum menampilkan form reset password.
@@ -74,13 +74,13 @@ func ResetPassword(token, newPassword string) error {
 		return errors.New("gagal memproses password")
 	}
 
-	// 4. Update password di DB
-	if err := repository.UpdateStaffPassword(resetToken.StaffID, hashedPassword); err != nil {
+	// 4. Tandai token terpakai + update password secara atomik (one-time use)
+	if err := repository.ConsumeTokenAndSetPassword(token, resetToken.StaffID, hashedPassword); err != nil {
+		if errors.Is(err, repository.ErrTokenUsed) {
+			return errors.New("link reset password tidak valid atau sudah kadaluwarsa")
+		}
 		return errors.New("gagal menyimpan password baru")
 	}
-
-	// 5. Tandai token sudah dipakai (one-time use)
-	_ = repository.MarkTokenUsed(token)
 
 	return nil
 }

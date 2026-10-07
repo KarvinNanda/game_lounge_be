@@ -11,8 +11,8 @@ type FnbItem struct {
 	ImageURL    *string    `gorm:"size:255" json:"image_url"`
 	Price       float64    `gorm:"type:decimal(12,2);not null;default:0" json:"price"`
 	MokaItemID  *string    `gorm:"size:100;index" json:"moka_item_id"`
-	IsAvailable bool       `gorm:"default:true" json:"is_available"`
-	IsActive    bool       `gorm:"default:true" json:"is_active"`
+	IsAvailable bool       `json:"is_available"`
+	IsActive    bool       `json:"is_active"`
 	SortOrder   int        `gorm:"default:0" json:"sort_order"`
 	CreatedBy   *string    `gorm:"size:255" json:"created_by"`
 	UpdatedBy   *string    `gorm:"size:255" json:"updated_by"`

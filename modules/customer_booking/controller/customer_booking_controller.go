@@ -1,8 +1,9 @@
 package controller
 
 import (
+	"errors"
+	"log"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 
@@ -11,6 +12,7 @@ import (
 	customerAppCtrl "game_lounge_be/modules/customer_app/controller"
 	"game_lounge_be/modules/customer_booking/repository"
 	"game_lounge_be/modules/customer_booking/service"
+	eventService "game_lounge_be/modules/event_booking/service"
 	"game_lounge_be/utils"
 
 	"github.com/gin-gonic/gin"
@@ -19,6 +21,33 @@ import (
 // GetAvailability mengambil slot tersedia untuk room type pada tanggal tertentu.
 // Public endpoint — tidak memerlukan autentikasi.
 // Query params: store_id, room_template_id, date (YYYY-MM-DD), duration_hours
+// GetQuote — GET /public/booking/quote?store_id&room_template_id&booking_date&selected_slots[]=10:00
+// Harga final untuk slot yang dipilih, tanpa membuat hold. Logika sama dengan /bookings/initiate.
+func GetQuote(c *gin.Context) {
+	storeID := c.Query("store_id")
+	roomTemplateID, _ := strconv.Atoi(c.Query("room_template_id"))
+	date := c.Query("booking_date")
+	slots := c.QueryArray("selected_slots[]")
+	if len(slots) == 0 {
+		slots = c.QueryArray("selected_slots")
+	}
+	if storeID == "" || roomTemplateID <= 0 || date == "" || len(slots) == 0 {
+		utils.ResponseError(c, http.StatusBadRequest, "store_id, room_template_id, booking_date, dan selected_slots[] wajib diisi")
+		return
+	}
+	if len(slots) > 24 {
+		utils.ResponseError(c, http.StatusBadRequest, "maksimal 24 slot")
+		return
+	}
+
+	result, err := service.QuoteBooking(storeID, uint(roomTemplateID), date, slots)
+	if err != nil {
+		utils.ResponseError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	utils.ResponseSuccess(c, http.StatusOK, "OK", result)
+}
+
 func GetAvailability(c *gin.Context) {
 	storeID            := c.Query("store_id")
 	roomTemplateID, _  := strconv.Atoi(c.Query("room_template_id"))
@@ -91,28 +120,38 @@ func XenditWebhook(c *gin.Context) {
 		var intent models.PlayCreditsPurchaseIntent
 		config.DB.Where("xendit_invoice_id = ?", payload.ID).First(&intent)
 		if intent.ID != "" {
-			customerAppCtrl.ConfirmPlayCreditsPaymentFromWebhook(intent.ID, payload.PaymentMethod)
+			customerAppCtrl.ConfirmPlayCreditsPaymentFromWebhook(intent.ID)
 		}
 		c.JSON(http.StatusOK, gin.H{"message": "credits confirmed"})
 	} else if strings.HasPrefix(payload.ExternalID, "EB-") {
 		// ── Event booking ─────────────────────────────────────
-		// ExternalID format: "EB-{full-uuid}" → extract UUID after "EB-"
-		eventBookingID := payload.ExternalID[3:]
-		var eb models.EventBooking
-		config.DB.Where("id = ?", eventBookingID).First(&eb)
-		if eb.ID != "" {
-			// EventBooking sudah "upcoming" saat dibuat — tidak ada field payment_status
-			// Tidak ada perubahan status yang diperlukan; booking sudah valid.
+		// Dicari lewat xendit_invoice_id (payload.ID), bukan external_id.
+		err := eventService.ConfirmCustomerPayment(payload.ID)
+		switch {
+		case err == nil:
+			c.JSON(http.StatusOK, gin.H{"message": "event booking confirmed"})
+		case errors.Is(err, eventService.ErrEventPaymentNotFound),
+			errors.Is(err, eventService.ErrEventPaymentProcessed),
+			errors.Is(err, eventService.ErrEventPaidButSlotTaken):
+			c.JSON(http.StatusOK, gin.H{"message": "ignored"})
+		default:
+			log.Printf("[WEBHOOK] gagal konfirmasi event invoice %s: %v", payload.ID, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"message": "retry"})
 		}
-		c.JSON(http.StatusOK, gin.H{"message": "event booking confirmed"})
 	} else {
 		// ── Room booking ───────────────────────────────────────
-		if err := service.ConfirmBookingFromWebhook(payload.ID, payload.PaymentMethod); err != nil {
-			// Tetap return 200 ke Xendit agar tidak di-retry
-			c.JSON(http.StatusOK, gin.H{"message": "processed with error", "error": err.Error()})
-			return
+		err := service.ConfirmBookingFromWebhook(payload.ID, payload.PaymentMethod)
+		switch {
+		case err == nil:
+			c.JSON(http.StatusOK, gin.H{"message": "booking confirmed"})
+		case errors.Is(err, service.ErrHoldNotFound), errors.Is(err, service.ErrPaidButSlotTaken):
+			// Sudah diproses / perlu tindakan manual — retry tidak akan membantu.
+			c.JSON(http.StatusOK, gin.H{"message": "ignored"})
+		default:
+			// Error sementara (DB dll). Handler idempotent → aman minta Xendit retry.
+			log.Printf("[WEBHOOK] gagal konfirmasi invoice %s: %v", payload.ID, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"message": "retry"})
 		}
-		c.JSON(http.StatusOK, gin.H{"message": "booking confirmed"})
 	}
 }
 
@@ -161,7 +200,7 @@ func GetMyBookingByID(c *gin.Context) {
 // Akan langsung membuat booking dari hold yang ada.
 func MockConfirm(c *gin.Context) {
 	// Blokir di production (jika Xendit key sudah diisi)
-	if os.Getenv("XENDIT_SECRET_KEY") != "" {
+	if !utils.XenditMockMode() {
 		utils.ResponseError(c, http.StatusForbidden, "Endpoint ini hanya tersedia di mode testing")
 		return
 	}

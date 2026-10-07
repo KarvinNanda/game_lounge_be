@@ -81,7 +81,7 @@ func CreateCustomer(req dto.CreateCustomerRequest, createdBy string) (*models.Cu
 	// Generate & hash password jika ada email
 	var plainPassword string
 	if req.Email != "" {
-		plainPassword = utils.GeneratePasswordFromName(req.Name)
+		plainPassword = utils.GenerateRandomPassword()
 		hash, err := utils.HashPassword(plainPassword)
 		if err != nil {
 			return nil, errors.New("gagal memproses password")
@@ -104,7 +104,7 @@ func CreateCustomer(req dto.CreateCustomerRequest, createdBy string) (*models.Cu
 		email := req.Email
 		pwd := plainPassword
 		wa := req.Whatsapp
-		go func() {
+		utils.SafeGo(func() {
 			tmpl, err := ntService.GetRendered("customer_welcome", map[string]string{
 				"nama_customer": name,
 				"email":         email,
@@ -123,7 +123,7 @@ func CreateCustomer(req dto.CreateCustomerRequest, createdBy string) (*models.Cu
 			if tmpl.IsWhatsappActive && wa != "" {
 				log.Printf("[Customer][WhatsApp placeholder] → %s: %s", wa, tmpl.WhatsappBody)
 			}
-		}()
+		})
 	}
 
 	return repository.FindCustomerByID(customer.ID)
@@ -243,13 +243,14 @@ func ResendPassword(id string) error {
 		return errors.New("customer tidak memiliki email, tidak dapat mengirim password")
 	}
 
-	plainPassword := utils.GeneratePasswordFromName(customer.Name)
+	plainPassword := utils.GenerateRandomPassword()
 	hash, err := utils.HashPassword(plainPassword)
 	if err != nil {
 		return errors.New("gagal memproses password")
 	}
 
 	customer.PasswordHash = &hash
+	customer.TokenVersion++ // password diganti → sesi lama berakhir
 	if err := repository.UpdateCustomer(customer); err != nil {
 		return errors.New("gagal menyimpan password baru")
 	}

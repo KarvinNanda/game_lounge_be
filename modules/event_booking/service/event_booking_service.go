@@ -3,60 +3,48 @@ package service
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"math"
 	"time"
 
 	"game_lounge_be/config"
 	"game_lounge_be/models"
+	customerBookingRepo "game_lounge_be/modules/customer_booking/repository"
 	"game_lounge_be/modules/event_booking/dto"
 	"game_lounge_be/modules/event_booking/repository"
 	storeRepository "game_lounge_be/modules/store/repository"
+	"game_lounge_be/utils"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-func parseMins(t string) int {
+// isHHMM menerima "HH:MM" atau "HH:MM:SS" dengan jam 00-23 dan menit 00-59.
+func isHHMM(t string) bool {
 	if len(t) < 5 {
-		return 0
+		return false
 	}
-	h := int(t[0]-'0')*10 + int(t[1]-'0')
-	m := int(t[3]-'0')*10 + int(t[4]-'0')
-	return h*60 + m
+	_, err := time.Parse("15:04", t[:5])
+	return err == nil
 }
 
-// computeStatus menghitung status event booking berdasarkan waktu Jakarta.
+// computeStatus menghitung status event booking dari waktu sekarang (WIB).
 func computeStatus(b models.EventBooking) string {
-	if b.Status == "cancelled" || b.Status == "completed" {
-		return b.Status
-	}
-	jakartaLoc, err := time.LoadLocation("Asia/Jakarta")
-	if err != nil {
-		jakartaLoc = time.UTC
-	}
-	now := time.Now().In(jakartaLoc)
-	startMins := parseMins(b.StartTime)
-	endMins := parseMins(b.EndTime)
-	if endMins <= startMins {
-		endMins += 24 * 60
-	}
-	nowMins := now.Hour()*60 + now.Minute()
-	today := now.Format("2006-01-02")
-	bDate := b.BookingDate.Format("2006-01-02")
+	return computeStatusAt(b, eventOpenMins(b.StoreID, b.BookingDate), time.Now())
+}
 
-	if bDate < today {
-		return "completed"
-	}
-	if bDate == today {
-		if nowMins >= endMins {
-			return "completed"
-		}
-		if nowMins >= startMins {
-			return "ongoing"
-		}
-	}
-	return "upcoming"
+// computeStatusAt: waktu absolut (utils.SessionStatus) supaya event lintas tengah
+// malam (mis. full day 09:00–02:00) tetap "ongoing" sampai 02:00.
+func computeStatusAt(b models.EventBooking, openMins int, now time.Time) string {
+	return utils.SessionStatus(b.Status, b.BookingDate, b.StartTime, b.EndTime, openMins, now)
+}
+
+func eventOpenMins(storeID string, date time.Time) int {
+	open, _ := customerBookingRepo.OperatingWindow(storeID, date.Format("2006-01-02"))
+	return open
 }
 
 // calculateTotalPrice menghitung harga proporsional.
@@ -103,7 +91,7 @@ func Create(req dto.CreateEventBookingRequest, createdBy string) (*models.EventB
 
 	// ── Hitung start/end time berdasarkan duration_type ───────────────
 	startTime := req.StartTime
-	endTime   := req.EndTime
+	endTime := req.EndTime
 
 	if req.DurationType == "full_day" {
 		var opErr error
@@ -118,9 +106,17 @@ func Create(req dto.CreateEventBookingRequest, createdBy string) (*models.EventB
 		}
 	}
 
+	if !isHHMM(startTime) || !isHHMM(endTime) {
+		return nil, errors.New("format jam tidak valid (HH:MM)")
+	}
+	// start == end dulu dihitung sebagai event 24 jam.
+	if startTime[:5] == endTime[:5] {
+		return nil, errors.New("jam mulai dan jam selesai tidak boleh sama")
+	}
+
 	// Hitung durasi
-	startMins := parseMins(startTime)
-	endMins   := parseMins(endTime)
+	startMins := utils.MinsOf(startTime)
+	endMins := utils.MinsOf(endTime)
 	if endMins <= startMins {
 		endMins += 24 * 60
 	}
@@ -261,7 +257,7 @@ func Cancel(id string, req dto.CancelEventBookingRequest, cancelledBy string) (*
 
 // GetForDashboard mengambil event booking untuk grid pada store & tanggal tertentu.
 func GetForDashboard(storeID, date string) ([]models.EventBooking, error) {
-	repository.BatchUpdateStatus(storeID, date)
+	repository.BatchUpdateStatus(storeID, computeStatus)
 	bookings, err := repository.FindForDashboard(storeID, date)
 	if err != nil {
 		return nil, err
@@ -294,8 +290,8 @@ func UpsertEventPrice(storeID string, pricePerDay float64, updatedBy string) (*m
 
 // PreviewPrice menghitung preview harga event sebelum booking dibuat.
 func PreviewPrice(storeID, startTime, endTime string) (map[string]interface{}, error) {
-	startMins := parseMins(startTime)
-	endMins   := parseMins(endTime)
+	startMins := utils.MinsOf(startTime)
+	endMins := utils.MinsOf(endTime)
 	if endMins <= startMins {
 		endMins += 24 * 60
 	}
@@ -307,10 +303,10 @@ func PreviewPrice(storeID, startTime, endTime string) (map[string]interface{}, e
 		return nil, errors.New("harga event belum dikonfigurasi untuk cabang ini")
 	}
 
-	// cek hari ni weekend or 
+	// cek hari ni weekend or
 	var dayCategory string
 	now := time.Now() // Pastikan timezone server sudah sesuai (misal WIB)
-	
+
 	switch now.Weekday() {
 	case time.Monday, time.Tuesday, time.Wednesday, time.Thursday:
 		dayCategory = "weekday"
@@ -324,7 +320,7 @@ func PreviewPrice(storeID, startTime, endTime string) (map[string]interface{}, e
 		return nil, errors.New("gagal mengambil data store")
 	}
 
-	if storeOperatingHours.OpenTime == startTime && storeOperatingHours.CloseTime == endTime{
+	if storeOperatingHours.OpenTime == startTime && storeOperatingHours.CloseTime == endTime {
 		isFullDay = true
 	} else {
 		isFullDay = false
@@ -342,4 +338,54 @@ func PreviewPrice(storeID, startTime, endTime string) (map[string]interface{}, e
 		"duration_hours": durationHours,
 		"total_price":    totalPrice,
 	}, nil
+}
+
+var (
+	// ErrEventPaymentNotFound: tidak ada event dengan invoice ini.
+	ErrEventPaymentNotFound = errors.New("event booking untuk invoice ini tidak ditemukan")
+	// ErrEventPaymentProcessed: webhook ulang untuk event yang sudah dibayar.
+	ErrEventPaymentProcessed = errors.New("pembayaran event sudah diproses")
+	// ErrEventPaidButSlotTaken: dibayar setelah event dibatalkan dan slot sudah
+	// dipakai / event dibatalkan admin. Butuh refund manual.
+	ErrEventPaidButSlotTaken = errors.New("pembayaran event diterima tetapi event tidak bisa diaktifkan — perlu refund manual")
+)
+
+// ConfirmCustomerPayment menandai event booking customer sebagai lunas.
+//
+// Idempotent: baris event dikunci (SELECT ... FOR UPDATE), jadi webhook ganda
+// diproses bergantian dan yang kedua mendapat ErrEventPaymentProcessed.
+// Jika event sudah di-cancel otomatis karena telat bayar, event dihidupkan lagi
+// selama slotnya masih kosong; selain itu dicatat sebagai orphan.
+func ConfirmCustomerPayment(invoiceID string) error {
+	return config.DB.Transaction(func(tx *gorm.DB) error {
+		var e models.EventBooking
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("xendit_invoice_id = ?", invoiceID).First(&e).Error; err != nil {
+			return ErrEventPaymentNotFound
+		}
+		if e.PaymentStatus != nil && *e.PaymentStatus == "paid" {
+			return ErrEventPaymentProcessed
+		}
+
+		updates := map[string]interface{}{"payment_status": "paid"}
+		if e.Status == "cancelled" {
+			date := e.BookingDate.Format("2006-01-02")
+			byAdmin := e.CancelledBy == nil || *e.CancelledBy != repository.CancelledBySystem
+			regular, err1 := repository.CheckOverlapWithRegular(e.StoreID, date, e.StartTime, e.EndTime)
+			event, err2 := repository.CheckOverlapWithEvent(e.StoreID, date, e.StartTime, e.EndTime, e.ID)
+			if err := errors.Join(err1, err2); err != nil {
+				return err
+			}
+			if byAdmin || regular || event {
+				log.Printf("[PAYMENT ORPHAN] event=%s invoice=%s customer=%v amount=%.0f: %v",
+					e.ID, invoiceID, e.CustomerID, e.TotalPrice, ErrEventPaidButSlotTaken)
+				return ErrEventPaidButSlotTaken
+			}
+			updates["status"] = "upcoming"
+			updates["cancel_reason"] = nil
+			updates["cancelled_at"] = nil
+			updates["cancelled_by"] = nil
+		}
+		return tx.Model(&models.EventBooking{}).Where("id = ?", e.ID).Updates(updates).Error
+	})
 }

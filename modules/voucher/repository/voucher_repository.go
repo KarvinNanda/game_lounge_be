@@ -276,3 +276,12 @@ func CountMembersForVoucher(isAllRoomTypes bool, roomTemplateIDs []uint) (int64,
 	err := query.Count(&count).Error
 	return count, err
 }
+
+// FindCustomerType mengembalikan tipe customer aktif ("member" / "regular").
+func FindCustomerType(customerID string) (string, error) {
+	var c models.Customer
+	err := config.DB.Select("type").
+		Where("id = ? AND status = 'active' AND deleted_at IS NULL", customerID).
+		First(&c).Error
+	return c.Type, err
+}

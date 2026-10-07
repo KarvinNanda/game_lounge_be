@@ -3,6 +3,8 @@ package repository
 import (
 	"game_lounge_be/config"
 	"game_lounge_be/models"
+
+	"gorm.io/gorm"
 )
 
 func FindAllStaffs(search string, roleID uint, storeID string, page, perPage int) ([]models.Staff, int64, error) {
@@ -26,7 +28,7 @@ func FindAllStaffs(search string, roleID uint, storeID string, page, perPage int
 	}
 
 	query.Count(&total)
-	err := query.Offset((page-1)*perPage).Limit(perPage).
+	err := query.Offset((page - 1) * perPage).Limit(perPage).
 		Order("staffs.created_at DESC").Find(&staffs).Error
 
 	return staffs, total, err
@@ -98,10 +100,20 @@ func SoftDeleteStaff(staff *models.Staff, deletedBy string) error {
 	}).Error
 }
 
-
 // UpdatePassword menyimpan password hash baru untuk staff.
+// UpdatePassword juga menaikkan token_version: sesi lama staff ikut berakhir.
 func UpdatePassword(staffID, hashedPassword string) error {
 	return config.DB.Model(&models.Staff{}).
 		Where("id = ?", staffID).
-		Update("password_hash", hashedPassword).Error
+		Updates(map[string]interface{}{
+			"password_hash": hashedPassword,
+			"token_version": gorm.Expr("token_version + 1"),
+		}).Error
+}
+
+// IsSystemRole mengembalikan apakah role (yang belum dihapus) adalah role is_system.
+func IsSystemRole(roleID uint) (bool, error) {
+	var role models.Role
+	err := config.DB.Where("id = ? AND deleted_at IS NULL", roleID).First(&role).Error
+	return role.IsSystem, err
 }

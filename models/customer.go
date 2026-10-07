@@ -17,6 +17,7 @@ type Customer struct {
 	Type         string     `gorm:"type:enum('member','regular');default:'regular'" json:"type"`
 	Status       string     `gorm:"type:enum('active','inactive');default:'active'" json:"status"`
 	Notes        *string    `gorm:"type:text" json:"notes"`
+	TokenVersion uint       `gorm:"not null;default:0" json:"-"` // naik saat logout/ganti password → JWT lama ditolak
 	CreatedBy    *string    `gorm:"size:255" json:"created_by"`
 	UpdatedBy    *string    `gorm:"size:255" json:"updated_by"`
 	DeletedBy    *string    `gorm:"size:255" json:"deleted_by"`

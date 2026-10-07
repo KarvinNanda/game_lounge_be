@@ -4,8 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
+	"math"
 	"os"
-	"sort"
 	"strings"
 	"time"
 
@@ -15,14 +16,18 @@ import (
 	"game_lounge_be/modules/customer_booking/repository"
 	pricingDto "game_lounge_be/modules/pricing/dto"
 	pricingService "game_lounge_be/modules/pricing/service"
+	voucherDto "game_lounge_be/modules/voucher/dto"
+	voucherRepo "game_lounge_be/modules/voucher/repository"
+	voucherService "game_lounge_be/modules/voucher/service"
 	"game_lounge_be/utils"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 // InitiateBookingRequest adalah payload dari customer untuk membuat hold + invoice.
-// SelectedSlots berisi list jam mulai per-1-jam: ["10:00","11:00","14:00"]
-// Slot tidak harus berurutan — sistem hitung start dari slot pertama dan end dari slot terakhir+1jam.
+// SelectedSlots berisi list jam mulai per-1-jam yang BERURUTAN: ["10:00","11:00","12:00"].
+// Lihat resolveSlotRange.
 type InitiateBookingRequest struct {
 	StoreID        string   `json:"store_id" binding:"required"`
 	RoomTemplateID uint     `json:"room_template_id" binding:"required"`
@@ -90,55 +95,56 @@ func InitiateBooking(req InitiateBookingRequest, customerID string) (map[string]
 		return nil, errors.New("format tanggal tidak valid (gunakan YYYY-MM-DD)")
 	}
 
-	// 2. Hitung start/end/duration dari selected_slots
-	if len(req.SelectedSlots) == 0 {
-		return nil, errors.New("pilih minimal 1 jam bermain")
+	// 2–3. Validasi slot & hitung harga (sama persis dengan endpoint quote)
+	quote, err := quoteSlots(req.StoreID, req.RoomTemplateID, req.BookingDate, req.SelectedSlots)
+	if err != nil {
+		return nil, err
 	}
-	sort.Strings(req.SelectedSlots)
-	startTime     := req.SelectedSlots[0]
-	lastSlot      := req.SelectedSlots[len(req.SelectedSlots)-1]
-	endMinsCalc   := timeToMins(lastSlot) + 60 // +1 jam dari slot terakhir
-	endTime       := minsToTime(endMinsCalc)
-	durationHours := float64(len(req.SelectedSlots))
+	startTime, endTime := quote.StartTime, quote.EndTime
+	durationHours := float64(quote.Hours)
+	totalPrice := quote.Price.FinalPrice
+	hasFlashSale := quote.Price.HasFlashSale
 
-	// 3. Hitung total harga dari semua slot (masing-masing 1 jam)
-	// Lebih akurat karena setiap slot bisa punya harga berbeda (happy hour, flash sale)
-	totalPrice   := 0.0
-	hasFlashSale := false
-	for _, slot := range req.SelectedSlots {
-		slotEnd := minsToTime(timeToMins(slot) + 60)
-		priceResult, priceErr := pricingService.CalculatePrice(pricingDto.CalculatePriceRequest{
-			StoreID:        req.StoreID,
-			RoomTemplateID: req.RoomTemplateID,
-			BookingDate:    req.BookingDate,
-			StartTime:      slot,
-			EndTime:        slotEnd,
-		})
-		if priceErr != nil {
-			return nil, errors.New("gagal menghitung harga untuk slot " + slot)
-		}
-		totalPrice += priceResult.FinalPrice
-		if priceResult.HasFlashSale {
-			hasFlashSale = true
-		}
-	}
-
-	// 4. Aplikasikan voucher jika ada
+	// 4. Aplikasikan voucher jika ada — validasi lengkap yang sama dengan admin
+	// (tanggal, tipe, store, room type, minimum, member, 1x per customer).
 	discountAmount := 0.0
-	finalPrice     := totalPrice
+	voucherCode := ""
+	var reservation *models.VoucherUsage
 	if req.VoucherID != "" {
-		var vErr error
-		discountAmount, finalPrice, vErr = applyVoucher(req.VoucherID, customerID, totalPrice)
-		if vErr != nil {
-			return nil, vErr
+		voucher, err := voucherRepo.FindVoucherByID(req.VoucherID)
+		if err != nil {
+			return nil, errors.New("voucher tidak ditemukan")
+		}
+		check, err := voucherService.ValidateVoucher(voucherDto.ValidateVoucherRequest{
+			Code:           voucher.Code,
+			CustomerID:     customerID,
+			StoreID:        req.StoreID,
+			Amount:         totalPrice,
+			UseType:        "booking",
+			RoomTemplateID: req.RoomTemplateID,
+		})
+		if err != nil {
+			return nil, err
+		}
+		if !check.IsValid {
+			return nil, errors.New(check.Message)
+		}
+		discountAmount = math.Round(check.DiscountAmount) // IDR tanpa desimal
+		voucherCode = voucher.Code
+		reservation = &models.VoucherUsage{
+			VoucherID:      voucher.ID,
+			CustomerID:     customerID,
+			DiscountAmount: discountAmount,
 		}
 	}
+	finalPrice := math.Round(totalPrice - discountAmount)
 
 	// Buat breakdown string untuk disimpan di hold
-	breakdownJSON := fmt.Sprintf(
-		`{"base":%.0f,"discount":%.0f,"final":%.0f,"voucher_id":"%s","has_flash_sale":%v}`,
-		totalPrice, discountAmount, finalPrice, req.VoucherID, hasFlashSale,
-	)
+	breakdownBytes, _ := json.Marshal(map[string]any{
+		"base": totalPrice, "discount": discountAmount, "final": finalPrice,
+		"voucher_id": req.VoucherID, "voucher_code": voucherCode, "has_flash_sale": hasFlashSale,
+	})
+	breakdownJSON := string(breakdownBytes)
 
 	// 5. Ambil data customer
 	var customer models.Customer
@@ -160,7 +166,7 @@ func InitiateBooking(req InitiateBookingRequest, customerID string) (map[string]
 		PaymentMethod:  req.PaymentMethod,
 	}
 
-	createdHold, err := repository.CreateHold(hold)
+	createdHold, err := repository.CreateHold(hold, reservation)
 	if err != nil {
 		return nil, err
 	}
@@ -174,15 +180,18 @@ func InitiateBooking(req InitiateBookingRequest, customerID string) (map[string]
 	}
 
 	invoice, err := utils.CreateXenditInvoice(utils.XenditInvoiceRequest{
-		ExternalID:  externalID,
-		Amount:      finalPrice,
+		ExternalID:      externalID,
+		Amount:          finalPrice,
+		InvoiceDuration: int(repository.HoldDuration.Seconds()),
 		PayerEmail:  payerEmail,
 		Description: fmt.Sprintf("Booking %s — %s %s", createdHold.RoomID, req.BookingDate, startTime),
 		SuccessURL:  fmt.Sprintf("%s/payment/success?hold_id=%s", appURL, createdHold.ID),
 		FailureURL:  fmt.Sprintf("%s/payment/failed?hold_id=%s", appURL, createdHold.ID),
 	})
 	if err != nil {
-		repository.DeleteHold(createdHold.ID)
+		if relErr := repository.ReleaseHold(createdHold); relErr != nil {
+			log.Printf("gagal melepas hold %s: %v", createdHold.ID, relErr)
+		}
 		return nil, errors.New("gagal membuat invoice pembayaran")
 	}
 
@@ -201,7 +210,7 @@ func InitiateBooking(req InitiateBookingRequest, customerID string) (map[string]
 	return map[string]interface{}{
 		"hold_id":         createdHold.ID,
 		"invoice_url":     invoiceURL,
-		"expires_at":      createdHold.ExpiresAt,
+		"expires_at":      createdHold.ExpiresAt.Format(time.RFC3339),
 		"base_price":      totalPrice,
 		"discount_amount": discountAmount,
 		"total_price":     finalPrice,
@@ -220,42 +229,131 @@ func InitiateBooking(req InitiateBookingRequest, customerID string) (map[string]
 	}, nil
 }
 
+// slotQuote = hasil validasi slot + harga untuk 1 rentang booking.
+type slotQuote struct {
+	StartTime, EndTime string
+	Hours              int
+	Available          bool
+	Price              *pricingDto.CalculatePriceResponse
+}
+
+// quoteSlots dipakai oleh InitiateBooking dan endpoint quote publik, supaya
+// harga yang ditampilkan sebelum bayar = harga yang ditagih.
+func quoteSlots(storeID string, roomTemplateID uint, bookingDate string, selected []string) (*slotQuote, error) {
+	if _, err := time.Parse("2006-01-02", bookingDate); err != nil {
+		return nil, errors.New("format tanggal tidak valid (gunakan YYYY-MM-DD)")
+	}
+	loc, _ := time.LoadLocation("Asia/Jakarta")
+	if bookingDate < time.Now().In(loc).Format("2006-01-02") {
+		return nil, errors.New("tanggal booking sudah lewat")
+	}
+
+	// Slot resmi hari itu (urut dari jam buka store)
+	daySlots, err := repository.GetAvailableSlots(storeID, roomTemplateID, bookingDate, 1)
+	if err != nil {
+		return nil, errors.New("gagal memuat jadwal ruangan")
+	}
+	dayOrder := make([]string, 0, len(daySlots))
+	free := make(map[string]bool, len(daySlots))
+	for _, sl := range daySlots {
+		dayOrder = append(dayOrder, sl.StartTime)
+		free[sl.StartTime] = sl.Available
+	}
+	start, end, hours, err := resolveSlotRange(selected, dayOrder)
+	if err != nil {
+		return nil, err
+	}
+	available := true
+	for _, sl := range selected {
+		available = available && free[sl]
+	}
+
+	// Harga untuk SELURUH rentang sekaligus — paket multi-jam ikut diperhitungkan.
+	price, err := pricingService.CalculatePrice(pricingDto.CalculatePriceRequest{
+		StoreID:        storeID,
+		RoomTemplateID: roomTemplateID,
+		BookingDate:    bookingDate,
+		StartTime:      start,
+		EndTime:        end,
+	})
+	if err != nil {
+		return nil, errors.New("gagal menghitung harga")
+	}
+	return &slotQuote{StartTime: start, EndTime: end, Hours: hours, Available: available, Price: price}, nil
+}
+
+// QuoteBooking = harga booking tanpa membuat hold (read-only, publik).
+func QuoteBooking(storeID string, roomTemplateID uint, bookingDate string, selected []string) (map[string]interface{}, error) {
+	q, err := quoteSlots(storeID, roomTemplateID, bookingDate, selected)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]interface{}{
+		"store_id":         storeID,
+		"room_template_id": roomTemplateID,
+		"booking_date":     bookingDate,
+		"start_time":       q.StartTime,
+		"end_time":         q.EndTime,
+		"duration_hours":   q.Hours,
+		"available":        q.Available,
+		"base_price":       q.Price.BasePrice,
+		"flash_discount":   q.Price.FlashDiscount,
+		"total_price":      math.Round(q.Price.FinalPrice),
+		"has_flash_sale":   q.Price.HasFlashSale,
+		"flash_sale_name":  q.Price.FlashSaleName,
+		"breakdown":        q.Price.Breakdown, // paket / happy hour / flash sale yang dipakai
+	}, nil
+}
+
+var (
+	// ErrHoldNotFound: hold untuk invoice ini tidak ada — sudah diproses oleh
+	// webhook sebelumnya (hold dihapus saat booking dibuat) atau invoice asing.
+	ErrHoldNotFound = errors.New("hold tidak ditemukan untuk invoice ini")
+	// ErrPaidButSlotTaken: customer membayar setelah hold habis dan slot sudah
+	// diambil orang lain. Butuh refund manual — jangan di-retry.
+	ErrPaidButSlotTaken = errors.New("pembayaran diterima tetapi slot sudah terpakai — perlu refund manual")
+)
+
 // ConfirmBookingFromWebhook dipanggil saat Xendit webhook PAID diterima.
 // Mengkonversi hold menjadi Booking permanen dan menghapus hold.
+//
+// Idempotent: hold "diklaim" dengan DELETE di dalam transaction yang sama dengan
+// INSERT booking. Webhook yang dikirim ulang/bersamaan akan mendapat 0 baris
+// dan tidak membuat booking kedua.
 func ConfirmBookingFromWebhook(xenditInvoiceID, paymentMethod string) error {
-	// 1. Temukan hold berdasarkan invoice ID
 	hold, err := repository.FindHoldByXenditInvoice(xenditInvoiceID)
 	if err != nil {
-		return errors.New("hold tidak ditemukan untuk invoice ini")
+		return ErrHoldNotFound
 	}
 
-	// 2. Cek hold belum expire
+	// Hold habis tapi uang sudah masuk: tetap buat booking jika slot masih kosong.
 	if hold.IsExpired() {
-		return errors.New("hold sudah expired — slot tidak lagi direservasi")
+		taken, err := bookingRepo.CheckOverlap(hold.RoomID, hold.StoreID,
+			hold.BookingDate.Format("2006-01-02"), hold.StartTime, hold.EndTime, "")
+		if err != nil {
+			return err
+		}
+		if taken {
+			log.Printf("[PAYMENT ORPHAN] invoice=%s hold=%s customer=%s amount=%.0f: %v",
+				xenditInvoiceID, hold.ID, hold.CustomerID, hold.TotalPrice, ErrPaidButSlotTaken)
+			return ErrPaidButSlotTaken
+		}
 	}
 
-	// 3. Generate booking code
 	bookingCode, err := bookingRepo.GenerateBookingCode()
 	if err != nil {
 		return errors.New("gagal generate kode booking")
 	}
 
-	// 4. Buat booking record permanen
-	customerIDPtr := hold.CustomerID
-	customerName  := hold.Customer.Name
-	customerWA    := hold.Customer.Whatsapp
-	var customerEmail *string
-	if hold.Customer.Email != nil {
-		customerEmail = hold.Customer.Email
-	}
-
+	customerID := hold.CustomerID
+	customerWA := hold.Customer.Whatsapp
 	booking := &models.Booking{
 		ID:               uuid.NewString(),
 		BookingCode:      bookingCode,
-		CustomerID:       &customerIDPtr,
-		CustomerName:     customerName,
+		CustomerID:       &customerID,
+		CustomerName:     hold.Customer.Name,
 		CustomerWhatsapp: &customerWA,
-		CustomerEmail:    customerEmail,
+		CustomerEmail:    hold.Customer.Email,
 		StoreID:          hold.StoreID,
 		RoomID:           hold.RoomID,
 		BookingDate:      hold.BookingDate,
@@ -266,33 +364,77 @@ func ConfirmBookingFromWebhook(xenditInvoiceID, paymentMethod string) error {
 		TotalPrice:       hold.TotalPrice,
 		PaymentMethod:    "cash", // Xendit dikategorikan cash untuk kompatibilitas enum existing
 		Status:           "upcoming",
-		CreatedBy:        &customerIDPtr,
+		CreatedBy:        &customerID,
+	}
+	voucher := holdVoucher(hold.PriceBreakdown)
+	if voucher.ID != "" {
+		booking.VoucherID = &voucher.ID
+		booking.VoucherCode = &voucher.Code
+		booking.DiscountAmount = hold.BasePrice - hold.TotalPrice
 	}
 
-	if err := config.DB.Create(booking).Error; err != nil {
-		return errors.New("gagal membuat booking")
-	}
-
-	// 5. Tandai voucher sebagai terpakai jika ada dalam breakdown
-	if strings.Contains(hold.PriceBreakdown, `"voucher_id":`) {
-		var breakdown struct {
-			VoucherID string `json:"voucher_id"`
+	errAlreadyProcessed := errors.New("already processed")
+	err = config.DB.Transaction(func(tx *gorm.DB) error {
+		claim := tx.Delete(&models.BookingHold{}, "id = ?", hold.ID)
+		if claim.Error != nil {
+			return claim.Error
 		}
-		if json.Unmarshal([]byte(hold.PriceBreakdown), &breakdown) == nil && breakdown.VoucherID != "" {
-			config.DB.Model(&models.VoucherUsage{}).
-				Where("voucher_id = ? AND customer_id = ? AND booking_id IS NULL",
-					breakdown.VoucherID, hold.CustomerID).
-				Update("booking_id", booking.ID)
+		if claim.RowsAffected != 1 {
+			return errAlreadyProcessed
 		}
+		if err := tx.Create(booking).Error; err != nil {
+			return err
+		}
+		return markVoucherUsed(tx, voucher.ID, hold.CustomerID, booking.ID, booking.DiscountAmount)
+	})
+	if errors.Is(err, errAlreadyProcessed) {
+		return ErrHoldNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("gagal membuat booking: %w", err)
 	}
 
-	// 6. Hapus hold setelah booking berhasil dibuat
-	repository.DeleteHold(hold.ID)
-
-	// 6. Kirim email konfirmasi secara async
-	go utils.SendBookingConfirmationEmail(hold.Customer, booking, hold.Store)
-
+	utils.SafeGo(func() { utils.SendBookingConfirmationEmail(hold.Customer, booking, hold.Store) })
 	return nil
+}
+
+type holdVoucherInfo struct {
+	ID   string `json:"voucher_id"`
+	Code string `json:"voucher_code"`
+}
+
+func holdVoucher(priceBreakdown string) holdVoucherInfo {
+	var v holdVoucherInfo
+	_ = json.Unmarshal([]byte(priceBreakdown), &v)
+	return v
+}
+
+// markVoucherUsed menautkan reservasi voucher ke booking dan menaikkan used_count.
+// Jika reservasi sudah hilang (mis. hold dibersihkan sebelum webhook datang),
+// usage dibuat ulang; bila UNIQUE menolak, booking tetap dibuat karena customer
+// sudah membayar harga diskon — kejadian ini dicatat di log.
+func markVoucherUsed(tx *gorm.DB, voucherID, customerID, bookingID string, discount float64) error {
+	if voucherID == "" {
+		return nil
+	}
+	res := tx.Model(&models.VoucherUsage{}).
+		Where("voucher_id = ? AND customer_id = ? AND booking_id IS NULL", voucherID, customerID).
+		Updates(map[string]interface{}{"booking_id": bookingID, "used_at": time.Now()})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		usage := &models.VoucherUsage{VoucherID: voucherID, CustomerID: customerID, BookingID: &bookingID, DiscountAmount: discount}
+		if err := tx.Create(usage).Error; err != nil {
+			if !utils.IsDuplicateKey(err) {
+				return err
+			}
+			log.Printf("[VOUCHER] voucher %s sudah dipakai customer %s; booking %s tetap dibuat", voucherID, customerID, bookingID)
+			return nil
+		}
+	}
+	return tx.Model(&models.Voucher{}).Where("id = ?", voucherID).
+		Update("used_count", gorm.Expr("used_count + 1")).Error
 }
 
 // GetCustomerBookings mengambil list booking milik customer dengan pagination.
@@ -324,55 +466,3 @@ func getPriceForSlot(storeID string, roomTemplateID uint, date, startTime, endTi
 	})
 }
 
-func timeToMins(t string) int {
-	if len(t) < 5 {
-		return 0
-	}
-	h := int(t[0]-'0')*10 + int(t[1]-'0')
-	m := int(t[3]-'0')*10 + int(t[4]-'0')
-	return h*60 + m
-}
-
-func minsToTime(m int) string {
-	m = m % (24 * 60)
-	return fmt.Sprintf("%02d:%02d", m/60, m%60)
-}
-
-// applyVoucher memvalidasi voucher dan mengembalikan diskon + harga akhir.
-func applyVoucher(voucherID, customerID string, basePrice float64) (discountAmount, finalPrice float64, err error) {
-	// Cek voucher dialokasikan ke customer dan belum dipakai
-	var vu models.VoucherUsage
-	if dbErr := config.DB.
-		Where("voucher_id = ? AND customer_id = ? AND booking_id IS NULL", voucherID, customerID).
-		First(&vu).Error; dbErr != nil {
-		return 0, basePrice, errors.New("voucher tidak valid atau sudah digunakan")
-	}
-
-	// Ambil detail voucher
-	var voucher models.Voucher
-	if dbErr := config.DB.Where("id = ? AND is_active = true AND deleted_at IS NULL", voucherID).
-		First(&voucher).Error; dbErr != nil {
-		return 0, basePrice, errors.New("voucher tidak ditemukan atau tidak aktif")
-	}
-
-	// Cek minimum purchase
-	if voucher.MinPurchase != nil && basePrice < *voucher.MinPurchase {
-		return 0, basePrice, fmt.Errorf("minimum pembelian Rp %.0f untuk menggunakan voucher ini", *voucher.MinPurchase)
-	}
-
-	// Hitung diskon
-	var discount float64
-	if voucher.DiscountType == "percentage" {
-		discount = basePrice * voucher.DiscountValue / 100
-		if voucher.MaxDiscount != nil && discount > *voucher.MaxDiscount {
-			discount = *voucher.MaxDiscount
-		}
-	} else {
-		discount = voucher.DiscountValue
-	}
-	if discount > basePrice {
-		discount = basePrice
-	}
-
-	return discount, basePrice - discount, nil
-}

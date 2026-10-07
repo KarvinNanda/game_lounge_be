@@ -22,28 +22,17 @@ func Upload(c *gin.Context) {
 	// ── Get file ─────────────────────────────────────────────
 	file, err := c.FormFile("file")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"status":  "error",
-			"message": "File tidak ditemukan, pastikan field bernama 'file'",
-		})
+		utils.ResponseError(c, http.StatusBadRequest, "File tidak ditemukan, pastikan field bernama 'file'")
 		return
 	}
 
 	// ── Save to ./assets/img/{folder}/ ───────────────────────
 	url, err := utils.SaveFileToAssets(file, folder)
 	if err != nil {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{
-			"status":  "error",
-			"message": err.Error(),
-		})
+		utils.ResponseError(c, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 
 	// ── Return public path ────────────────────────────────────
-	c.JSON(http.StatusOK, gin.H{
-		"status": "success",
-		"data": gin.H{
-			"url": url,
-		},
-	})
+	utils.ResponseSuccess(c, http.StatusOK, "Upload berhasil", gin.H{"url": url})
 }

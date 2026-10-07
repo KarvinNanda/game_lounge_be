@@ -2,7 +2,6 @@ package controller
 
 import (
 	"net/http"
-	"strings"
 
 	"game_lounge_be/modules/admin_recovery/service"
 	"game_lounge_be/utils"
@@ -25,14 +24,12 @@ func Request(c *gin.Context) {
 		return
 	}
 
-	// Ambil IP address yang sebenarnya (dukung proxy/load balancer)
+	// ClientIP() hanya memakai X-Forwarded-For dari TRUSTED_PROXIES (router.go).
+	// Jangan baca header itu langsung: client bisa memalsukannya untuk bypass limit per IP.
 	ip := c.ClientIP()
-	if forwarded := c.GetHeader("X-Forwarded-For"); forwarded != "" {
-		ip = strings.TrimSpace(strings.Split(forwarded, ",")[0])
-	}
 
 	// Proses request secara async — response tidak menunggu hasil proses
-	go service.RequestReset(req.Email, ip)
+	utils.SafeGo(func() { service.RequestReset(req.Email, ip) })
 
 	// SELALU return response yang sama — penyerang tidak tahu apakah email valid
 	c.JSON(http.StatusOK, gin.H{

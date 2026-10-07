@@ -20,16 +20,42 @@ func jwtSecret() ([]byte, error) {
 	return []byte(s), nil
 }
 
+// Audience membedakan staff token dan customer token. Keduanya ditandatangani
+// dengan secret yang sama, jadi tanpa aud sebuah customer token lolos
+// ValidateJWT (StaffID kosong) dan bisa dipakai sebagai staff_token.
+const (
+	audienceStaff    = "staff"
+	audienceCustomer = "customer"
+)
+
+// parseHS256 memverifikasi signature HS256, exp (wajib), dan audience.
+func parseHS256(tokenString string, claims jwt.Claims, audience string) (*jwt.Token, error) {
+	secret, err := jwtSecret()
+	if err != nil {
+		return nil, err
+	}
+	return jwt.ParseWithClaims(tokenString, claims, func(*jwt.Token) (interface{}, error) {
+		return secret, nil
+	},
+		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
+		jwt.WithExpirationRequired(),
+		jwt.WithAudience(audience),
+	)
+}
+
 type JWTClaims struct {
 	StaffID     string   `json:"staff_id"`
 	Username    string   `json:"username"`
 	RoleID      uint     `json:"role_id"`
 	IsSystem    bool     `json:"is_system"`
 	Permissions []string `json:"permissions"`
+	// TokenVersion harus sama dengan staffs.token_version; naik saat logout /
+	// ganti password, sehingga token lama langsung tidak berlaku.
+	TokenVersion uint `json:"tv"`
 	jwt.RegisteredClaims
 }
 
-func GenerateJWT(staffID, username string, roleID uint, isSystem bool, permissions []string) (string, error) {
+func GenerateJWT(staffID, username string, roleID uint, isSystem bool, permissions []string, tokenVersion uint) (string, error) {
 	secret, err := jwtSecret()
 	if err != nil {
 		return "", err
@@ -40,12 +66,14 @@ func GenerateJWT(staffID, username string, roleID uint, isSystem bool, permissio
 	}
 
 	claims := JWTClaims{
-		StaffID:     staffID,
-		Username:    username,
-		RoleID:      roleID,
-		IsSystem:    isSystem,
-		Permissions: permissions,
+		StaffID:      staffID,
+		Username:     username,
+		RoleID:       roleID,
+		IsSystem:     isSystem,
+		Permissions:  permissions,
+		TokenVersion: tokenVersion,
 		RegisteredClaims: jwt.RegisteredClaims{
+			Audience:  jwt.ClaimStrings{audienceStaff},
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Duration(expiredHours) * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 		},
@@ -56,27 +84,14 @@ func GenerateJWT(staffID, username string, roleID uint, isSystem bool, permissio
 }
 
 func ValidateJWT(tokenString string) (*JWTClaims, error) {
-	secret, err := jwtSecret()
+	token, err := parseHS256(tokenString, &JWTClaims{}, audienceStaff)
 	if err != nil {
 		return nil, err
 	}
-
-	token, err := jwt.ParseWithClaims(tokenString, &JWTClaims{}, func(t *jwt.Token) (interface{}, error) {
-		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, errors.New("unexpected signing method")
-		}
-		return secret, nil
-	})
-
-	if err != nil {
-		return nil, err
-	}
-
 	claims, ok := token.Claims.(*JWTClaims)
-	if !ok || !token.Valid {
+	if !ok || !token.Valid || claims.StaffID == "" {
 		return nil, errors.New("invalid token")
 	}
-
 	return claims, nil
 }
 
@@ -87,11 +102,12 @@ func ValidateJWT(tokenString string) (*JWTClaims, error) {
 type CustomerJWTClaims struct {
 	CustomerID   string `json:"customer_id"`
 	CustomerType string `json:"customer_type"` // "member" | "regular"
+	TokenVersion uint   `json:"tv"`            // = customers.token_version
 	jwt.RegisteredClaims
 }
 
 // GenerateCustomerJWT membuat token JWT untuk customer (expire 7 hari).
-func GenerateCustomerJWT(customerID, customerType string) (string, error) {
+func GenerateCustomerJWT(customerID, customerType string, tokenVersion uint) (string, error) {
 	secret, err := jwtSecret()
 	if err != nil {
 		return "", err
@@ -99,7 +115,9 @@ func GenerateCustomerJWT(customerID, customerType string) (string, error) {
 	claims := CustomerJWTClaims{
 		CustomerID:   customerID,
 		CustomerType: customerType,
+		TokenVersion: tokenVersion,
 		RegisteredClaims: jwt.RegisteredClaims{
+			Audience:  jwt.ClaimStrings{audienceCustomer},
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(7 * 24 * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 		},
@@ -111,16 +129,7 @@ func GenerateCustomerJWT(customerID, customerType string) (string, error) {
 // ValidateCustomerJWT memvalidasi token customer.
 // Return error jika bukan customer token (cek field customer_id).
 func ValidateCustomerJWT(tokenStr string) (*CustomerJWTClaims, error) {
-	secret, err := jwtSecret()
-	if err != nil {
-		return nil, err
-	}
-	token, err := jwt.ParseWithClaims(tokenStr, &CustomerJWTClaims{}, func(t *jwt.Token) (interface{}, error) {
-		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, errors.New("unexpected signing method")
-		}
-		return secret, nil
-	})
+	token, err := parseHS256(tokenStr, &CustomerJWTClaims{}, audienceCustomer)
 	if err != nil {
 		return nil, err
 	}

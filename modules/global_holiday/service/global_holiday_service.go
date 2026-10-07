@@ -1,6 +1,7 @@
 package service
 
 import (
+	"game_lounge_be/utils"
 	"errors"
 	"log"
 	"time"
@@ -35,7 +36,7 @@ func Create(req dto.CreateGlobalHolidayRequest, createdBy string) (*models.Globa
 	}
 
 	// Auto-populate ke semua store aktif (async, tidak blocking)
-	go propagateToAllStores(h)
+	utils.SafeGo(func() { propagateToAllStores(h) })
 
 	return h, nil
 }
@@ -56,7 +57,7 @@ func Update(id uint, req dto.UpdateGlobalHolidayRequest, updatedBy string) (*mod
 
 	// Sinkronisasi ke store holidays yang masih menggunakan jam dari global
 	// (yang global_holiday_id = id ini dan belum di-override manual)
-	go syncStoreHolidays(h)
+	utils.SafeGo(func() { syncStoreHolidays(h) })
 
 	return h, nil
 }

@@ -17,6 +17,9 @@ type XenditInvoiceRequest struct {
 	Description string  `json:"description"`
 	SuccessURL  string  `json:"success_redirect_url"`
 	FailureURL  string  `json:"failure_redirect_url"`
+	// InvoiceDuration (detik). Tanpa ini Xendit memakai default 24 jam, sehingga
+	// customer bisa membayar setelah hold/intent di sisi kita sudah habis.
+	InvoiceDuration int `json:"invoice_duration,omitempty"`
 }
 
 type XenditInvoiceResponse struct {
@@ -26,12 +29,10 @@ type XenditInvoiceResponse struct {
 }
 
 // CreateXenditInvoice membuat invoice di Xendit.
-// MOCK MODE: jika XENDIT_SECRET_KEY kosong, return dummy URL untuk testing.
+// MOCK MODE: lihat XenditMockMode — return dummy URL untuk testing.
 func CreateXenditInvoice(req XenditInvoiceRequest) (*XenditInvoiceResponse, error) {
-	secretKey := os.Getenv("XENDIT_SECRET_KEY")
-
-	// ── MOCK MODE (belum punya API key) ──────────────────────────────────────
-	if secretKey == "" {
+	// ── MOCK MODE (dev tanpa API key) ────────────────────────────────────────
+	if XenditMockMode() {
 		mockID := fmt.Sprintf("mock-invoice-%s-%d", req.ExternalID, time.Now().Unix())
 		mockURL := fmt.Sprintf("%s/payment/mock?invoice_id=%s&amount=%.0f",
 			os.Getenv("APP_URL"), mockID, req.Amount)
@@ -46,7 +47,7 @@ func CreateXenditInvoice(req XenditInvoiceRequest) (*XenditInvoiceResponse, erro
 	payload, _ := json.Marshal(req)
 	httpReq, _ := http.NewRequest("POST", "https://api.xendit.co/v2/invoices", bytes.NewBuffer(payload))
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.SetBasicAuth(secretKey, "")
+	httpReq.SetBasicAuth(os.Getenv("XENDIT_SECRET_KEY"), "")
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(httpReq)
@@ -55,8 +56,16 @@ func CreateXenditInvoice(req XenditInvoiceRequest) (*XenditInvoiceResponse, erro
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("xendit invoice gagal: HTTP %d", resp.StatusCode)
+	}
 	var result XenditInvoiceResponse
-	json.NewDecoder(resp.Body).Decode(&result)
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("xendit response tidak valid: %w", err)
+	}
+	if result.ID == "" || result.InvoiceURL == "" {
+		return nil, fmt.Errorf("xendit response tanpa invoice id/url")
+	}
 	return &result, nil
 }
 
@@ -66,10 +75,9 @@ func CreateXenditInvoice(req XenditInvoiceRequest) (*XenditInvoiceResponse, erro
 func VerifyXenditWebhook(token string) bool {
 	expected := os.Getenv("XENDIT_WEBHOOK_TOKEN")
 	if expected == "" {
-		// Mock mode hanya jika Xendit memang belum dikonfigurasi sama sekali.
-		// Jika secret key ada tapi webhook token lupa diset → TOLAK semua webhook
-		// (fail-closed), jangan malah terbuka.
-		return os.Getenv("XENDIT_SECRET_KEY") == ""
+		// Tanpa token hanya diterima di mock mode (dev, key kosong). Jika key ada
+		// tapi token lupa diset, atau di production → TOLAK (fail-closed).
+		return XenditMockMode()
 	}
 	return subtle.ConstantTimeCompare([]byte(token), []byte(expected)) == 1
 }

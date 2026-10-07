@@ -6,6 +6,7 @@ import (
 	"game_lounge_be/modules/staff/dto"
 	"game_lounge_be/modules/staff/repository"
 	"game_lounge_be/utils"
+	"log"
 	"time"
 
 	"github.com/google/uuid"
@@ -23,7 +24,15 @@ func GetStaffByID(id string) (*models.Staff, error) {
 	return staff, nil
 }
 
-func CreateStaff(req dto.CreateStaffRequest, createdBy string) (*models.Staff, error) {
+func CreateStaff(req dto.CreateStaffRequest, actor Actor) (*models.Staff, error) {
+	newRoleIsSystem, err := repository.IsSystemRole(req.RoleID)
+	if err != nil {
+		return nil, errors.New("role tidak ditemukan")
+	}
+	if err := checkStaffWrite(staffWrite{actor: actor, newRoleIsSystem: newRoleIsSystem}); err != nil {
+		return nil, err
+	}
+
 	// Check username uniqueness
 	if _, err := repository.FindStaffByUsername(req.Username); err == nil {
 		return nil, errors.New("username sudah digunakan")
@@ -47,7 +56,7 @@ func CreateStaff(req dto.CreateStaffRequest, createdBy string) (*models.Staff, e
 		Phone:        &phone,
 		PasswordHash: hash,
 		IsAllStores:  req.IsAllStores,
-		CreatedBy:    &createdBy,
+		CreatedBy:    &actor.Username,
 	}
 
 	if err := repository.CreateStaff(staff); err != nil {
@@ -61,10 +70,23 @@ func CreateStaff(req dto.CreateStaffRequest, createdBy string) (*models.Staff, e
 	return repository.FindStaffByID(staff.ID)
 }
 
-func UpdateStaff(id string, req dto.UpdateStaffRequest, updatedBy string) (*models.Staff, error) {
+func UpdateStaff(id string, req dto.UpdateStaffRequest, actor Actor) (*models.Staff, error) {
 	staff, err := repository.FindStaffByID(id)
 	if err != nil {
 		return nil, errors.New("staff tidak ditemukan")
+	}
+	newRoleIsSystem, err := repository.IsSystemRole(req.RoleID)
+	if err != nil {
+		return nil, errors.New("role tidak ditemukan")
+	}
+	if err := checkStaffWrite(staffWrite{
+		actor:           actor,
+		targetIsSystem:  staff.Role.IsSystem,
+		newRoleIsSystem: newRoleIsSystem,
+		isSelf:          staff.ID == actor.ID,
+		roleChanged:     staff.RoleID != req.RoleID,
+	}); err != nil {
+		return nil, err
 	}
 
 	// Check username uniqueness (exclude self)
@@ -78,7 +100,7 @@ func UpdateStaff(id string, req dto.UpdateStaffRequest, updatedBy string) (*mode
 	staff.Email = req.Email
 	staff.Phone = &phone
 	staff.IsAllStores = req.IsAllStores
-	staff.UpdatedBy = &updatedBy
+	staff.UpdatedBy = &actor.Username
 
 	if err := repository.UpdateStaff(staff); err != nil {
 		return nil, errors.New("gagal update staff")
@@ -93,14 +115,17 @@ func UpdateStaff(id string, req dto.UpdateStaffRequest, updatedBy string) (*mode
 	return repository.FindStaffByID(staff.ID)
 }
 
-func DeleteStaff(id string, deletedBy string) error {
+func DeleteStaff(id string, actor Actor) error {
 	staff, err := repository.FindStaffByID(id)
 	if err != nil {
 		return errors.New("staff tidak ditemukan")
 	}
+	if err := checkStaffWrite(staffWrite{actor: actor, targetIsSystem: staff.Role.IsSystem}); err != nil {
+		return err
+	}
 	now := time.Now()
 	staff.DeletedAt = &now
-	return repository.SoftDeleteStaff(staff, deletedBy)
+	return repository.SoftDeleteStaff(staff, actor.Username)
 }
 
 // ── Reset Password ────────────────────────────────────────────────────────────
@@ -113,14 +138,14 @@ type ResetPasswordResult struct {
 	Message  string `json:"message"`
 }
 
-// ResetStaffPassword generate password baru dari username, simpan ke DB, kirim ke email staff.
+// ResetStaffPassword generate password acak baru, simpan ke DB, kirim ke email staff.
 func ResetStaffPassword(staffID string) (*ResetPasswordResult, error) {
 	staff, err := repository.FindStaffByID(staffID)
 	if err != nil {
 		return nil, errors.New("staff tidak ditemukan")
 	}
 
-	newPassword := utils.GeneratePasswordFromName(staff.Username)
+	newPassword := utils.GenerateRandomPassword()
 
 	hashedPassword, err := utils.HashPassword(newPassword)
 	if err != nil {
@@ -134,13 +159,13 @@ func ResetStaffPassword(staffID string) (*ResetPasswordResult, error) {
 	// Kirim email ke staff (async)
 	username := staff.Username
 	email := staff.Email
-	go func() {
+	utils.SafeGo(func() {
 		subject := "Password Akun Quantum Anda Telah Direset"
 		body := "Halo " + username + "!\n\nPassword akun Quantum Playstation Rental kamu telah direset oleh Super Admin.\n\nBerikut password baru kamu:\nUsername : " + username + "\nPassword : " + newPassword + "\n\nSegera login dan ganti password kamu setelah masuk.\n\nSalam,\nTim Quantum Gaming Center"
 		if err := utils.SendEmail(email, username, subject, body); err != nil {
-			_ = err // log sudah ada di SendEmail
+			log.Printf("[Staff] gagal kirim email reset password ke %s: %v", email, err)
 		}
-	}()
+	})
 
 	return &ResetPasswordResult{
 		StaffID:  staff.ID,

@@ -20,9 +20,9 @@ type Voucher struct {
 	SendChannel   *string    `gorm:"type:enum('whatsapp','email','all')" json:"send_channel"`
 	TotalSent     uint       `gorm:"default:0" json:"total_sent"`
 	UsedCount     uint       `gorm:"default:0" json:"used_count"`
-	IsAllStores   bool       `gorm:"default:true" json:"is_all_stores"`
-	IsAllRoomTypes bool      `gorm:"default:true" json:"is_all_room_types"`
-	IsActive      bool       `gorm:"default:true" json:"is_active"`
+	IsAllStores   bool       `json:"is_all_stores"`
+	IsAllRoomTypes bool      `json:"is_all_room_types"`
+	IsActive      bool       `json:"is_active"`
 	CreatedBy     *string    `gorm:"size:255" json:"created_by"`
 	UpdatedBy     *string    `gorm:"size:255" json:"updated_by"`
 	DeletedBy     *string    `gorm:"size:255" json:"deleted_by"`

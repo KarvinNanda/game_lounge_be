@@ -3,6 +3,8 @@ package repository
 import (
 	"game_lounge_be/config"
 	"game_lounge_be/models"
+
+	"gorm.io/gorm"
 )
 
 func FindStaffByUsername(username string) (*models.Staff, error) {
@@ -31,4 +33,11 @@ func FindPermissionsByRoleID(roleID uint) ([]string, error) {
 		result[i] = p.Permission
 	}
 	return result, nil
+}
+
+// BumpTokenVersion menaikkan token_version staff → semua JWT yang sudah terbit
+// untuk staff ini ditolak oleh AuthMiddleware.
+func BumpTokenVersion(staffID string) error {
+	return config.DB.Model(&models.Staff{}).Where("id = ?", staffID).
+		Update("token_version", gorm.Expr("token_version + 1")).Error
 }

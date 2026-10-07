@@ -7,8 +7,8 @@ import "time"
 type StorePricing struct {
 	ID                 uint       `gorm:"primaryKey;autoIncrement" json:"id"`
 	StoreID            string     `gorm:"type:char(36);not null;uniqueIndex" json:"store_id"`
-	IsHappyHourEnabled bool       `gorm:"default:true" json:"is_happy_hour_enabled"`
-	IsMixedTimeEnabled bool       `gorm:"default:true" json:"is_mixed_time_enabled"`
+	IsHappyHourEnabled bool       `json:"is_happy_hour_enabled"`
+	IsMixedTimeEnabled bool       `json:"is_mixed_time_enabled"`
 	EdgeCase2h         string     `gorm:"column:edge_case_2h;type:enum('two_x_1h','force_3h');default:'two_x_1h'" json:"edge_case_2h"`
 	EdgeCase4h         string     `gorm:"column:edge_case_4h;type:enum('3h_plus_1h','force_5h');default:'3h_plus_1h'" json:"edge_case_4h"`
 	CreatedBy          *string    `gorm:"size:255" json:"created_by"`

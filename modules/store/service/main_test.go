@@ -100,7 +100,9 @@ func setupStoreFixtures() {
 func teardownStoreFixtures() {
 	config.DB.Unscoped().Where("store_id = ?", testStoreID).Delete(&models.StoreOperatingHour{})
 	config.DB.Unscoped().Where("store_id = ?", testStoreID).Delete(&models.StoreHolidaySchedule{})
-	config.DB.Unscoped().Where("store_id = ?", testStoreID).Delete(&models.Store{})
+	// stores tidak punya kolom store_id — dulu Where("store_id = ?") gagal diam-diam
+	// dan setiap run meninggalkan store "TEST ..." di DB dev.
+	config.DB.Unscoped().Delete(&models.Store{}, "id = ?", testStoreID)
 	// Bersihkan global holiday test jika ada sisa
 	for _, d := range []string{"2099-08-17", "2099-09-20"} {
 		config.DB.Unscoped().Where("DATE(date) = ? AND name LIKE 'TEST%'", d).

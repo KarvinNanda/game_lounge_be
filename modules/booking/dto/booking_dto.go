@@ -11,7 +11,7 @@ type CreateBookingRequest struct {
 	BookingDate      string  `json:"booking_date" binding:"required"` // YYYY-MM-DD
 	StartTime        string  `json:"start_time" binding:"required"`   // HH:MM
 	EndTime          string  `json:"end_time" binding:"required"`     // HH:MM
-	DurationHours    float64 `json:"duration_hours" binding:"required,min=0.5"`
+	DurationHours    float64 `json:"duration_hours"` // diabaikan: durasi dihitung server dari start/end
 	PaymentMethod    string  `json:"payment_method"`   // 'cash' | 'play_credits'
 	PlayCreditID     string  `json:"play_credit_id"`   // wajib jika payment_method = 'play_credits'
 	VoucherCode      string  `json:"voucher_code"`     // opsional

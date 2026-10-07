@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -264,7 +265,7 @@ func TestAuthMiddleware_TanpaCookie_401(t *testing.T) {
 func TestAuthMiddleware_HeaderAuthorization_TidakDiterima(t *testing.T) {
 	// Cookie-only: token via Authorization header TIDAK lagi diterima
 	t.Setenv("JWT_SECRET", "test-secret")
-	token, _ := utils.GenerateJWT("staff-1", "admin", 1, true, nil)
+	token, _ := utils.GenerateJWT("staff-1", "admin", 1, true, nil, 0)
 
 	r := gin.New()
 	r.GET("/protected", AuthMiddleware(), func(c *gin.Context) { c.String(200, "ok") })
@@ -292,9 +293,20 @@ func TestAuthMiddleware_CookiePalsu_401(t *testing.T) {
 	}
 }
 
+// stubStaffAccess mengganti loader DB selama 1 test.
+func stubStaffAccess(t *testing.T, fn func(staffID string) (*StaffAccess, error)) {
+	t.Helper()
+	orig := loadStaffAccess
+	loadStaffAccess = fn
+	t.Cleanup(func() { loadStaffAccess = orig })
+}
+
 func TestAuthMiddleware_CookieValid_200(t *testing.T) {
 	t.Setenv("JWT_SECRET", "test-secret")
-	token, err := utils.GenerateJWT("staff-1", "admin", 1, true, nil)
+	stubStaffAccess(t, func(string) (*StaffAccess, error) {
+		return &StaffAccess{IsSystem: true, RoleID: 1}, nil
+	})
+	token, err := utils.GenerateJWT("staff-1", "admin", 1, true, nil, 0)
 	if err != nil {
 		t.Fatalf("GenerateJWT error: %v", err)
 	}
@@ -318,9 +330,18 @@ func TestAuthMiddleware_CookieValid_200(t *testing.T) {
 
 // ── CustomerAuth (cookie-based) ───────────────────────────────
 
+// stubCustomerAccess mengganti loader DB customer selama 1 test.
+func stubCustomerAccess(t *testing.T, fn func(customerID string) (*CustomerAccess, error)) {
+	t.Helper()
+	orig := loadCustomerAccess
+	loadCustomerAccess = fn
+	t.Cleanup(func() { loadCustomerAccess = orig })
+}
+
 func TestCustomerAuth_CookieValid_200(t *testing.T) {
 	t.Setenv("JWT_SECRET", "test-secret")
-	token, _ := utils.GenerateCustomerJWT("cust-1", "member")
+	stubCustomerAccess(t, func(string) (*CustomerAccess, error) { return &CustomerAccess{Type: "member"}, nil })
+	token, _ := utils.GenerateCustomerJWT("cust-1", "member", 0)
 
 	r := gin.New()
 	r.GET("/me", CustomerAuth(), func(c *gin.Context) {
@@ -339,7 +360,7 @@ func TestCustomerAuth_CookieValid_200(t *testing.T) {
 func TestCustomerAuth_StaffCookie_Ditolak(t *testing.T) {
 	// Staff token di cookie customer → ditolak (claims customer_id kosong)
 	t.Setenv("JWT_SECRET", "test-secret")
-	staffToken, _ := utils.GenerateJWT("staff-1", "admin", 1, true, nil)
+	staffToken, _ := utils.GenerateJWT("staff-1", "admin", 1, true, nil, 0)
 
 	r := gin.New()
 	r.GET("/me", CustomerAuth(), func(c *gin.Context) { c.String(200, "ok") })
@@ -356,9 +377,10 @@ func TestCustomerAuth_StaffCookie_Ditolak(t *testing.T) {
 // ── CSRF origin check ─────────────────────────────────────────
 
 func TestCSRF_PostDariOriginAsing_403(t *testing.T) {
+	stubStaffAccess(t, func(string) (*StaffAccess, error) { return &StaffAccess{IsSystem: true, RoleID: 1}, nil })
 	t.Setenv("JWT_SECRET", "test-secret")
 	t.Setenv("ALLOWED_ORIGINS", "https://app.example.com")
-	token, _ := utils.GenerateJWT("staff-1", "admin", 1, true, nil)
+	token, _ := utils.GenerateJWT("staff-1", "admin", 1, true, nil, 0)
 
 	r := gin.New()
 	r.POST("/protected", AuthMiddleware(), func(c *gin.Context) { c.String(200, "ok") })
@@ -375,9 +397,10 @@ func TestCSRF_PostDariOriginAsing_403(t *testing.T) {
 }
 
 func TestCSRF_PostDariOriginTerdaftar_Lolos(t *testing.T) {
+	stubStaffAccess(t, func(string) (*StaffAccess, error) { return &StaffAccess{IsSystem: true, RoleID: 1}, nil })
 	t.Setenv("JWT_SECRET", "test-secret")
 	t.Setenv("ALLOWED_ORIGINS", "https://app.example.com")
-	token, _ := utils.GenerateJWT("staff-1", "admin", 1, true, nil)
+	token, _ := utils.GenerateJWT("staff-1", "admin", 1, true, nil, 0)
 
 	r := gin.New()
 	r.POST("/protected", AuthMiddleware(), func(c *gin.Context) { c.String(200, "ok") })
@@ -393,11 +416,12 @@ func TestCSRF_PostDariOriginTerdaftar_Lolos(t *testing.T) {
 }
 
 func TestCSRF_GetTidakDicek(t *testing.T) {
+	stubStaffAccess(t, func(string) (*StaffAccess, error) { return &StaffAccess{IsSystem: true, RoleID: 1}, nil })
 	// GET bukan state-changing → origin asing tetap lolos CSRF check
 	// (tetap butuh cookie valid untuk auth)
 	t.Setenv("JWT_SECRET", "test-secret")
 	t.Setenv("ALLOWED_ORIGINS", "https://app.example.com")
-	token, _ := utils.GenerateJWT("staff-1", "admin", 1, true, nil)
+	token, _ := utils.GenerateJWT("staff-1", "admin", 1, true, nil, 0)
 
 	r := gin.New()
 	r.GET("/protected", AuthMiddleware(), func(c *gin.Context) { c.String(200, "ok") })
@@ -409,5 +433,124 @@ func TestCSRF_GetTidakDicek(t *testing.T) {
 	r.ServeHTTP(w, req)
 	if w.Code != 200 {
 		t.Errorf("GET tidak dicek CSRF, harus 200, got %d", w.Code)
+	}
+}
+
+// ── Akses staff dibaca dari DB, bukan dari JWT ────────────────
+
+func TestAuthMiddleware_StaffTerhapus_401(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+	stubStaffAccess(t, func(string) (*StaffAccess, error) {
+		return nil, errors.New("record not found")
+	})
+	token, _ := utils.GenerateJWT("staff-1", "admin", 1, true, nil, 0)
+
+	r := gin.New()
+	r.GET("/protected", AuthMiddleware(), func(c *gin.Context) { c.String(200, "ok") })
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/protected", nil)
+	req.AddCookie(&http.Cookie{Name: utils.StaffCookieName, Value: token})
+	r.ServeHTTP(w, req)
+	if w.Code != 401 {
+		t.Errorf("staff yang sudah dihapus harus 401, got %d", w.Code)
+	}
+}
+
+func TestAuthMiddleware_PermissionDariDB_BukanDariJWT(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+	// JWT lama mengklaim is_system + pricing.edit, tapi role di DB sudah diturunkan.
+	stubStaffAccess(t, func(string) (*StaffAccess, error) {
+		return &StaffAccess{IsSystem: false, RoleID: 3, Permissions: []string{"bookings.view"}}, nil
+	})
+	token, _ := utils.GenerateJWT("staff-1", "kasir", 1, true, []string{"pricing.edit"}, 0)
+
+	r := gin.New()
+	r.PUT("/pricing", AuthMiddleware(), RequirePermission("pricing.edit"), func(c *gin.Context) { c.String(200, "ok") })
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("PUT", "/pricing", nil)
+	req.AddCookie(&http.Cookie{Name: utils.StaffCookieName, Value: token})
+	r.ServeHTTP(w, req)
+	if w.Code != 403 {
+		t.Errorf("permission harus dibaca dari DB (403), got %d", w.Code)
+	}
+}
+
+func TestRequirePermission(t *testing.T) {
+	cases := []struct {
+		name     string
+		isSystem bool
+		perms    []string
+		require  []string
+		want     int
+	}{
+		{"super admin selalu lolos", true, nil, []string{"pricing.edit"}, 200},
+		{"punya permission", false, []string{"pricing.edit"}, []string{"pricing.edit"}, 200},
+		{"salah satu dari beberapa", false, []string{"bookings.create"}, []string{"customers.view", "bookings.create"}, 200},
+		{"tidak punya permission", false, []string{"bookings.view"}, []string{"pricing.edit"}, 403},
+		{"tanpa permission sama sekali", false, nil, []string{"bookings.view"}, 403},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := gin.New()
+			r.GET("/x", func(c *gin.Context) {
+				c.Set("is_system", tc.isSystem)
+				c.Set("permissions", tc.perms)
+			}, RequirePermission(tc.require...), func(c *gin.Context) { c.String(200, "ok") })
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, httptest.NewRequest("GET", "/x", nil))
+			if w.Code != tc.want {
+				t.Errorf("want %d, got %d", tc.want, w.Code)
+			}
+		})
+	}
+}
+
+// ── Revocation via token_version ──────────────────────────────
+
+func TestAuthMiddleware_TokenVersionLama_401(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+	// Staff sudah logout / ganti password → token_version di DB naik jadi 3.
+	stubStaffAccess(t, func(string) (*StaffAccess, error) {
+		return &StaffAccess{IsSystem: true, RoleID: 1, TokenVersion: 3}, nil
+	})
+	token, _ := utils.GenerateJWT("staff-1", "admin", 1, true, nil, 2)
+
+	r := gin.New()
+	r.GET("/protected", AuthMiddleware(), func(c *gin.Context) { c.String(200, "ok") })
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/protected", nil)
+	req.AddCookie(&http.Cookie{Name: utils.StaffCookieName, Value: token})
+	r.ServeHTTP(w, req)
+	if w.Code != 401 {
+		t.Errorf("token dengan versi lama harus 401, got %d", w.Code)
+	}
+}
+
+func TestCustomerAuth_Revocation(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+	cases := []struct {
+		name   string
+		access *CustomerAccess
+		err    error
+		want   int
+	}{
+		{"versi cocok", &CustomerAccess{Type: "member", TokenVersion: 2}, nil, 200},
+		{"versi lama (sudah logout/ganti password)", &CustomerAccess{Type: "member", TokenVersion: 3}, nil, 401},
+		{"customer nonaktif/terhapus", nil, errors.New("not found"), 401},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stubCustomerAccess(t, func(string) (*CustomerAccess, error) { return tc.access, tc.err })
+			token, _ := utils.GenerateCustomerJWT("cust-1", "member", 2)
+			r := gin.New()
+			r.GET("/me", CustomerAuth(), func(c *gin.Context) { c.String(200, c.GetString("customer_type")) })
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest("GET", "/me", nil)
+			req.AddCookie(&http.Cookie{Name: utils.CustomerCookieName, Value: token})
+			r.ServeHTTP(w, req)
+			if w.Code != tc.want {
+				t.Errorf("want %d, got %d", tc.want, w.Code)
+			}
+		})
 	}
 }

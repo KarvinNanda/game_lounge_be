@@ -25,7 +25,7 @@ func Login(req dto.LoginRequest) (*dto.LoginResponse, error) {
 		}
 	}
 
-	token, err := utils.GenerateJWT(staff.ID, staff.Username, staff.RoleID, staff.Role.IsSystem, permissions)
+	token, err := utils.GenerateJWT(staff.ID, staff.Username, staff.RoleID, staff.Role.IsSystem, permissions, staff.TokenVersion)
 	if err != nil {
 		return nil, err
 	}

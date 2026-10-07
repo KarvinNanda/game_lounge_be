@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -13,6 +12,7 @@ import (
 	"game_lounge_be/modules/pricing/dto"
 	"game_lounge_be/modules/pricing/repository"
 	globalHolidayRepo "game_lounge_be/modules/global_holiday/repository"
+	"game_lounge_be/utils"
 
 	"github.com/google/uuid"
 )
@@ -334,8 +334,8 @@ func CalculatePrice(req dto.CalculatePriceRequest) (*dto.CalculatePriceResponse,
 		return nil, errors.New("format booking_date tidak valid (YYYY-MM-DD)")
 	}
 
-	startMins := parseTimeToMinutes(req.StartTime)
-	endMins := parseTimeToMinutes(req.EndTime)
+	startMins := utils.MinsOf(req.StartTime)
+	endMins := utils.MinsOf(req.EndTime)
 	if endMins <= startMins {
 		endMins += 24 * 60 // lintas tengah malam
 	}
@@ -371,8 +371,8 @@ func CalculatePrice(req dto.CalculatePriceRequest) (*dto.CalculatePriceResponse,
 	if fs, fsErr := repository.FindActiveFlashSale(
 		req.StoreID, req.RoomTemplateID, bookingDate, req.StartTime, req.EndTime,
 	); fsErr == nil && fs != nil {
-		fsStartMins := parseTimeToMinutes(fs.TimeFrom)
-		fsEndMins := parseTimeToMinutes(fs.TimeTo)
+		fsStartMins := utils.MinsOf(fs.TimeFrom)
+		fsEndMins := utils.MinsOf(fs.TimeTo)
 		if fsEndMins <= fsStartMins {
 			fsEndMins += 24 * 60
 		}
@@ -404,7 +404,7 @@ func CalculatePrice(req dto.CalculatePriceRequest) (*dto.CalculatePriceResponse,
 		fsTotal := fsHours * flashSale.PricePerHour
 		basePrice += fsTotal
 		breakdown = append(breakdown, dto.PriceBreakdownItem{
-			TimeRange:   fmt.Sprintf("%s - %s", minutesToTime(fsOverlapStart), minutesToTime(fsOverlapEnd)),
+			TimeRange:   fmt.Sprintf("%s - %s", utils.MinsToClock(fsOverlapStart), utils.MinsToClock(fsOverlapEnd)),
 			Type:        "Flash Sale",
 			Description: fmt.Sprintf("%s — %s Jam × Rp %.0f", flashSale.Name, formatHours(fsHours), flashSale.PricePerHour),
 			Amount:      fsTotal,
@@ -451,8 +451,8 @@ func splitByHappyHour(segStart, segEnd int, schedules []models.StoreHappyHourSch
 	var hhIntervals []interval
 
 	for _, s := range schedules {
-		hhStart := parseTimeToMinutes(s.StartTime)
-		hhEnd := parseTimeToMinutes(s.EndTime)
+		hhStart := utils.MinsOf(s.StartTime)
+		hhEnd := utils.MinsOf(s.EndTime)
 		if hhEnd < hhStart {
 			hhEnd += 24 * 60
 		}
@@ -511,7 +511,7 @@ func priceNormalSegment(
 		normalHours := int(math.Ceil(float64(segMins) / 60.0))
 		price, desc := findCheapestPackage(normalHours, packages, pricing)
 		return price, []dto.PriceBreakdownItem{{
-			TimeRange:   fmt.Sprintf("%s - %s", minutesToTime(segStart), minutesToTime(segEnd)),
+			TimeRange:   fmt.Sprintf("%s - %s", utils.MinsToClock(segStart), utils.MinsToClock(segEnd)),
 			Type:        "Normal Hour",
 			Description: desc,
 			Amount:      price,
@@ -529,7 +529,7 @@ func priceNormalSegment(
 			hhTotal := hhHours * hhPrice.PricePerHour
 			totalPrice += hhTotal
 			items = append(items, dto.PriceBreakdownItem{
-				TimeRange:   fmt.Sprintf("%s - %s", minutesToTime(slot.Start), minutesToTime(slot.End)),
+				TimeRange:   fmt.Sprintf("%s - %s", utils.MinsToClock(slot.Start), utils.MinsToClock(slot.End)),
 				Type:        "Happy Hour",
 				Description: fmt.Sprintf("%s Jam × Rp %.0f", formatHours(hhHours), hhPrice.PricePerHour),
 				Amount:      hhTotal,
@@ -539,7 +539,7 @@ func priceNormalSegment(
 			price, desc := findCheapestPackage(normalHours, packages, pricing)
 			totalPrice += price
 			items = append(items, dto.PriceBreakdownItem{
-				TimeRange:   fmt.Sprintf("%s - %s", minutesToTime(slot.Start), minutesToTime(slot.End)),
+				TimeRange:   fmt.Sprintf("%s - %s", utils.MinsToClock(slot.Start), utils.MinsToClock(slot.End)),
 				Type:        "Normal Hour",
 				Description: desc,
 				Amount:      price,
@@ -576,25 +576,6 @@ func formatHours(h float64) string {
 		return fmt.Sprintf("%d", int(h))
 	}
 	return fmt.Sprintf("%.1f", h)
-}
-
-// parseTimeToMinutes menerima format "HH:MM" maupun "HH:MM:SS" (format MySQL TIME).
-func parseTimeToMinutes(t string) int {
-	parts := strings.Split(t, ":")
-	if len(parts) < 2 {
-		return 0
-	}
-	h, _ := strconv.Atoi(parts[0])
-	m, _ := strconv.Atoi(parts[1])
-	return h*60 + m
-}
-
-func minutesToTime(mins int) string {
-	mins = mins % (24 * 60)
-	if mins < 0 {
-		mins += 24 * 60
-	}
-	return fmt.Sprintf("%02d:%02d", mins/60, mins%60)
 }
 
 // findCheapestPackage mencari kombinasi paket termurah untuk n jam Normal Hour.

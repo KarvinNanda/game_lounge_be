@@ -7,38 +7,7 @@ import (
 	"game_lounge_be/models"
 )
 
-// ── parseTimeToMins ───────────────────────────────────────────
-
-func TestParseTimeToMins_Normal(t *testing.T) {
-	cases := []struct {
-		input string
-		want  int
-	}{
-		{"00:00", 0},
-		{"01:00", 60},
-		{"10:30", 630},
-		{"16:00", 960},
-		{"23:59", 1439},
-	}
-	for _, c := range cases {
-		got := parseTimeToMins(c.input)
-		if got != c.want {
-			t.Errorf("parseTimeToMins(%q) = %d, want %d", c.input, got, c.want)
-		}
-	}
-}
-
-func TestParseTimeToMins_StringPendek(t *testing.T) {
-	// String kurang dari 5 karakter → 0
-	cases := []string{"", "1", "10:", "1:0"}
-	for _, s := range cases {
-		if got := parseTimeToMins(s); got != 0 {
-			t.Errorf("parseTimeToMins(%q) = %d, want 0", s, got)
-		}
-	}
-}
-
-// ── computeStatus ─────────────────────────────────────────────
+// Parsing jam (dulu parseTimeToMins) kini di utils.ClockMins — dites di utils/session_test.go.
 
 func makeBooking(status, date, start, end string) models.Booking {
 	d, _ := time.Parse("2006-01-02", date)
@@ -50,65 +19,39 @@ func makeBooking(status, date, start, end string) models.Booking {
 	}
 }
 
-func TestComputeStatus_StatusFinal(t *testing.T) {
-	// Booking yang sudah cancelled/completed tidak dihitung ulang
-	b1 := makeBooking("cancelled", "2030-01-01", "10:00", "12:00")
-	if got := computeStatus(b1); got != "cancelled" {
-		t.Errorf("want 'cancelled', got %q", got)
-	}
-	b2 := makeBooking("completed", "2030-01-01", "10:00", "12:00")
-	if got := computeStatus(b2); got != "completed" {
-		t.Errorf("want 'completed', got %q", got)
-	}
+// ── computeStatusAt ───────────────────────────────────────────
+// Waktu "sekarang" dan jam buka diberikan eksplisit supaya test tidak bergantung
+// pada jam saat test dijalankan. Store buka 10:00, tutup 02:00.
+
+const testOpen = 10 * 60
+
+func at(date string, h, m int) time.Time {
+	d, _ := time.ParseInLocation("2006-01-02", date, jakartaLoc)
+	return d.Add(time.Duration(h)*time.Hour + time.Duration(m)*time.Minute)
 }
 
-func TestComputeStatus_TanggalLampau(t *testing.T) {
-	// Booking kemarin (atau lebih lama) selalu "completed"
-	yesterday := time.Now().In(jakartaLoc).AddDate(0, 0, -1).Format("2006-01-02")
-	b := makeBooking("upcoming", yesterday, "10:00", "12:00")
-	if got := computeStatus(b); got != "completed" {
-		t.Errorf("tanggal lampau: want 'completed', got %q", got)
+func TestComputeStatus(t *testing.T) {
+	cases := []struct {
+		name string
+		b    models.Booking
+		now  time.Time
+		want string
+	}{
+		{"cancelled tidak dihitung ulang", makeBooking("cancelled", "2030-01-01", "10:00", "12:00"), at("2030-01-01", 11, 0), "cancelled"},
+		{"completed tidak dihitung ulang", makeBooking("completed", "2030-01-01", "10:00", "12:00"), at("2029-12-31", 9, 0), "completed"},
+		{"tanggal lampau", makeBooking("upcoming", "2030-01-01", "10:00", "12:00"), at("2030-01-02", 15, 0), "completed"},
+		{"tanggal mendatang", makeBooking("upcoming", "2030-01-02", "10:00", "12:00"), at("2030-01-01", 15, 0), "upcoming"},
+		{"hari ini sudah selesai", makeBooking("upcoming", "2030-01-01", "10:00", "12:00"), at("2030-01-01", 13, 0), "completed"},
+		{"hari ini belum mulai", makeBooking("upcoming", "2030-01-01", "20:00", "22:00"), at("2030-01-01", 13, 0), "upcoming"},
+		{"hari ini sedang berjalan", makeBooking("upcoming", "2030-01-01", "12:00", "14:00"), at("2030-01-01", 13, 0), "ongoing"},
+		{"23:00–02:00, jam 00:30 besoknya masih berjalan", makeBooking("upcoming", "2030-01-01", "23:00", "02:00"), at("2030-01-02", 0, 30), "ongoing"},
+		{"sesi 00:30–01:30 tgl 1 terjadi tgl 2 dini hari", makeBooking("upcoming", "2030-01-01", "00:30", "01:30"), at("2030-01-01", 23, 0), "upcoming"},
 	}
-}
-
-func TestComputeStatus_TanggalMendatang(t *testing.T) {
-	// Booking besok (atau lebih jauh) selalu "upcoming"
-	tomorrow := time.Now().In(jakartaLoc).AddDate(0, 0, 1).Format("2006-01-02")
-	b := makeBooking("upcoming", tomorrow, "10:00", "12:00")
-	if got := computeStatus(b); got != "upcoming" {
-		t.Errorf("tanggal mendatang: want 'upcoming', got %q", got)
-	}
-}
-
-func TestComputeStatus_HariIni_SudahSelesai(t *testing.T) {
-	// Booking hari ini, jam selesai sudah lewat → "completed"
-	// Gunakan jam 00:01 - 00:02 (hampir pasti sudah lewat kecuali tes jalan tengah malam)
-	todayStr := time.Now().In(jakartaLoc).Format("2006-01-02")
-	b := makeBooking("upcoming", todayStr, "00:01", "00:02")
-
-	now := time.Now().In(jakartaLoc)
-	nowMins := now.Hour()*60 + now.Minute()
-	if nowMins < 2 {
-		t.Skip("skip: tes jalan terlalu dekat tengah malam")
-	}
-
-	if got := computeStatus(b); got != "completed" {
-		t.Errorf("jam sudah lewat hari ini: want 'completed', got %q", got)
-	}
-}
-
-func TestComputeStatus_HariIni_BelumMulai(t *testing.T) {
-	// Booking hari ini, jam masih sangat jauh ke depan (23:50-23:59) → "upcoming"
-	todayStr := time.Now().In(jakartaLoc).Format("2006-01-02")
-	b := makeBooking("upcoming", todayStr, "23:50", "23:59")
-
-	now := time.Now().In(jakartaLoc)
-	nowMins := now.Hour()*60 + now.Minute()
-	if nowMins >= 23*60+50 {
-		t.Skip("skip: tes jalan terlalu malam (>= 23:50)")
-	}
-
-	if got := computeStatus(b); got != "upcoming" {
-		t.Errorf("belum dimulai: want 'upcoming', got %q", got)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := computeStatusAt(tc.b, testOpen, tc.now); got != tc.want {
+				t.Errorf("want %q, got %q", tc.want, got)
+			}
+		})
 	}
 }

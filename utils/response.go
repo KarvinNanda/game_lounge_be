@@ -1,6 +1,12 @@
 package utils
 
-import "github.com/gin-gonic/gin"
+import (
+	"log"
+	"net/http"
+	"regexp"
+
+	"github.com/gin-gonic/gin"
+)
 
 type Meta struct {
 	Page      int   `json:"page"`
@@ -26,7 +32,25 @@ func ResponseSuccessPaginate(c *gin.Context, statusCode int, message string, dat
 	})
 }
 
+// dbErrorPattern mengenali pesan error mentah dari driver MySQL / database/sql.
+var dbErrorPattern = regexp.MustCompile(`Error \d{4} \(|^sql: |database is closed|connection refused`)
+
+// ResponseError mengirim error ke client. Error 5xx dan pesan mentah dari DB
+// tidak pernah dikirim apa adanya (bisa membocorkan nama tabel, kolom, index,
+// alamat host): pesan asli dicatat di log, client mendapat pesan generik.
 func ResponseError(c *gin.Context, statusCode int, message string) {
+	if statusCode >= http.StatusInternalServerError || dbErrorPattern.MatchString(message) {
+		method := ""
+		if c.Request != nil {
+			method = c.Request.Method
+		}
+		log.Printf("[ERROR] %s %s → %d: %s", method, c.FullPath(), statusCode, message)
+		if statusCode >= http.StatusInternalServerError {
+			message = "Terjadi kesalahan pada server. Silakan coba lagi."
+		} else {
+			message = "Permintaan tidak dapat diproses"
+		}
+	}
 	c.JSON(statusCode, gin.H{
 		"success": false,
 		"message": message,

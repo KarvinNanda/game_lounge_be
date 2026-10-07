@@ -118,7 +118,10 @@ func FindOrdersByCustomer(customerID string) ([]models.FnbOrder, error) {
 
 func CreateOrder(order *models.FnbOrder) error { return config.DB.Create(order).Error }
 
-func UpdateOrderStatus(id, status string) error {
-	return config.DB.Model(&models.FnbOrder{}).Where("id = ?", id).
-		Update("status", status).Error
+// UpdateOrderStatus mengubah status hanya jika status saat ini masih `from`
+// (2 admin yang mengubah bersamaan tidak saling menimpa). changed=false jika tidak.
+func UpdateOrderStatus(id, from, to string) (changed bool, err error) {
+	res := config.DB.Model(&models.FnbOrder{}).Where("id = ? AND status = ?", id, from).
+		Update("status", to)
+	return res.RowsAffected == 1, res.Error
 }

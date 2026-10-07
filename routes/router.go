@@ -6,9 +6,9 @@ import (
 	authCtrl "game_lounge_be/modules/auth/controller"
 	bannerCtrl "game_lounge_be/modules/banner/controller"
 	bookingCtrl "game_lounge_be/modules/booking/controller"
-	bookingCustomerCtrl "game_lounge_be/modules/customer_booking/controller"
-	customerAppCtrl "game_lounge_be/modules/customer_app/controller"
 	customerCtrl "game_lounge_be/modules/customer/controller"
+	customerAppCtrl "game_lounge_be/modules/customer_app/controller"
+	bookingCustomerCtrl "game_lounge_be/modules/customer_booking/controller"
 	eventCtrl "game_lounge_be/modules/event_booking/controller"
 	facilityCtrl "game_lounge_be/modules/facility/controller"
 	fnbCtrl "game_lounge_be/modules/fnb/controller"
@@ -23,6 +23,7 @@ import (
 	storeCtrl "game_lounge_be/modules/store/controller"
 	uploadCtrl "game_lounge_be/modules/upload/controller"
 	voucherCtrl "game_lounge_be/modules/voucher/controller"
+	"game_lounge_be/utils"
 
 	"os"
 	"strings"
@@ -50,6 +51,8 @@ func SetupRouter() *gin.Engine {
 	r.Use(middleware.SecurityHeaders())
 	r.Use(middleware.CORSMiddleware())
 	r.Use(middleware.MaxBodySize(10 << 20)) // 10 MB max request body
+	r.Use(middleware.ClampPerPage(100))     // per_page maksimal 100
+	r.Use(middleware.SVGAsAttachment())     // SVG upload tidak dirender saat dibuka langsung
 
 	// Rate limiter untuk endpoint sensitif (login, forgot password):
 	// max 10 request per menit per IP per endpoint.
@@ -74,9 +77,9 @@ func SetupRouter() *gin.Engine {
 	api.POST("/admin/auth/login", authLimiter, authCtrl.Login)
 
 	// ── Admin Recovery (forgot password super admin) ──────────
-	api.POST("/admin/admin-recovery/request",          authLimiter, recoveryCtrl.Request)
-	api.GET("/admin/admin-recovery/:token/validate",    recoveryCtrl.Validate)
-	api.POST("/admin/admin-recovery/:token/reset",      authLimiter, recoveryCtrl.Reset)
+	api.POST("/admin/admin-recovery/request", authLimiter, recoveryCtrl.Request)
+	api.GET("/admin/admin-recovery/:token/validate", recoveryCtrl.Validate)
+	api.POST("/admin/admin-recovery/:token/reset", authLimiter, recoveryCtrl.Reset)
 
 	// ── Protected endpoints (staff JWT via cookie) ────────────
 	protected := api.Group("/admin")
@@ -91,258 +94,265 @@ func SetupRouter() *gin.Engine {
 		protected.POST("upload", uploadCtrl.Upload)
 
 		// Roles
-		protected.GET("roles", roleCtrl.GetAll)
-		protected.POST("roles", roleCtrl.Create)
-		protected.GET("roles/:id", roleCtrl.GetByID)
-		protected.PUT("roles/:id", roleCtrl.Update)
-		protected.DELETE("roles/:id", roleCtrl.Delete)
+		protected.GET("roles", middleware.RequirePermission("settings.staff_role"), roleCtrl.GetAll)
+		protected.POST("roles", middleware.RequirePermission("settings.staff_role"), roleCtrl.Create)
+		protected.GET("roles/:id", middleware.RequirePermission("settings.staff_role"), roleCtrl.GetByID)
+		protected.PUT("roles/:id", middleware.RequirePermission("settings.staff_role"), roleCtrl.Update)
+		protected.DELETE("roles/:id", middleware.RequirePermission("settings.staff_role"), roleCtrl.Delete)
 
 		// Staffs
-		protected.GET("staffs", staffCtrl.GetAll)
-		protected.POST("staffs", staffCtrl.Create)
-		protected.GET("staffs/:id", staffCtrl.GetByID)
-		protected.PUT("staffs/:id", staffCtrl.Update)
-		protected.DELETE("staffs/:id", staffCtrl.Delete)
-		protected.POST("staffs/:id/reset-password", staffCtrl.ResetPassword)
+		protected.GET("staffs", middleware.RequirePermission("settings.staff_role"), staffCtrl.GetAll)
+		protected.POST("staffs", middleware.RequirePermission("settings.staff_role"), staffCtrl.Create)
+		protected.GET("staffs/:id", middleware.RequirePermission("settings.staff_role"), staffCtrl.GetByID)
+		protected.PUT("staffs/:id", middleware.RequirePermission("settings.staff_role"), staffCtrl.Update)
+		protected.DELETE("staffs/:id", middleware.RequirePermission("settings.staff_role"), staffCtrl.Delete)
+		protected.POST("staffs/:id/reset-password", middleware.RequireSuperAdmin(), staffCtrl.ResetPassword)
 
 		// Facility Categories
 		protected.GET("facility-categories", facilityCtrl.GetAllCategories)
-		protected.POST("facility-categories", facilityCtrl.CreateCategory)
-		protected.PUT("facility-categories/:id", facilityCtrl.UpdateCategory)
-		protected.DELETE("facility-categories/:id", facilityCtrl.DeleteCategory)
+		protected.POST("facility-categories", middleware.RequirePermission("settings.branches"), facilityCtrl.CreateCategory)
+		protected.PUT("facility-categories/:id", middleware.RequirePermission("settings.branches"), facilityCtrl.UpdateCategory)
+		protected.DELETE("facility-categories/:id", middleware.RequirePermission("settings.branches"), facilityCtrl.DeleteCategory)
 
 		// Facilities
 		protected.GET("facilities", facilityCtrl.GetAll)
-		protected.POST("facilities", facilityCtrl.Create)
+		protected.POST("facilities", middleware.RequirePermission("settings.branches"), facilityCtrl.Create)
 		protected.GET("facilities/:id", facilityCtrl.GetByID)
-		protected.PUT("facilities/:id", facilityCtrl.Update)
-		protected.DELETE("facilities/:id", facilityCtrl.Delete)
+		protected.PUT("facilities/:id", middleware.RequirePermission("settings.branches"), facilityCtrl.Update)
+		protected.DELETE("facilities/:id", middleware.RequirePermission("settings.branches"), facilityCtrl.Delete)
 
 		// Room Templates
 		protected.GET("room-templates", roomTemplateCtrl.GetAll)
-		protected.POST("room-templates", roomTemplateCtrl.Create)
+		protected.POST("room-templates", middleware.RequirePermission("rooms.create"), roomTemplateCtrl.Create)
 		protected.GET("room-templates/:id", roomTemplateCtrl.GetByID)
-		protected.PUT("room-templates/:id", roomTemplateCtrl.Update)
-		protected.DELETE("room-templates/:id", roomTemplateCtrl.Delete)
+		protected.PUT("room-templates/:id", middleware.RequirePermission("rooms.edit"), roomTemplateCtrl.Update)
+		protected.DELETE("room-templates/:id", middleware.RequirePermission("rooms.delete"), roomTemplateCtrl.Delete)
 
 		// Stores
 		// Note: rute statis (operating-hours) didaftarkan SEBELUM /:id
 		// supaya Gin tidak mengira "operating-hours" adalah store_id.
 		protected.GET("stores", storeCtrl.GetAll)
-		protected.POST("stores", storeCtrl.Create)
+		protected.POST("stores", middleware.RequirePermission("settings.branches"), storeCtrl.Create)
 		protected.GET("stores/operating-hours", storeCtrl.GetOperatingHours)
 		protected.GET("stores/:id", storeCtrl.GetByID)
-		protected.PUT("stores/:id", storeCtrl.Update)
-		protected.DELETE("stores/:id", storeCtrl.Delete)
+		protected.PUT("stores/:id", middleware.RequirePermission("settings.branches"), middleware.RequireStoreParam("id"), storeCtrl.Update)
+		protected.DELETE("stores/:id", middleware.RequirePermission("settings.branches"), middleware.RequireStoreParam("id"), storeCtrl.Delete)
 
 		// Store Rooms
-		protected.PATCH("store-rooms/:id/toggle", storeCtrl.ToggleRoomActive)
+		protected.PATCH("store-rooms/:id/toggle", middleware.RequirePermission("settings.branches"), middleware.RequireEntityStore("id", middleware.StoreOf("store_rooms")), storeCtrl.ToggleRoomActive)
 
 		// ── Pricing ───────────────────────────────────────────
 		// Note: rute statis (calculate, flash-sales) didaftarkan SEBELUM /:store_id
 		// supaya Gin tidak mengira "calculate" adalah store_id.
 
 		// Calculator (POST — tidak bentrok dengan GET /:store_id)
-		protected.POST("pricing/calculate", pricingCtrl.Calculate)
+		protected.POST("pricing/calculate", middleware.RequirePermission("pricing.view", "bookings.create"), pricingCtrl.Calculate)
 
 		// Flash Sales (tanpa store_id prefix — untuk PUT/DELETE by flash-sale ID)
-		protected.PUT("pricing/flash-sales/:id", pricingCtrl.UpdateFlashSale)
-		protected.DELETE("pricing/flash-sales/:id", pricingCtrl.DeleteFlashSale)
+		protected.PUT("pricing/flash-sales/:id", middleware.RequirePermission("pricing.edit"), middleware.RequireEntityStore("id", middleware.StoreOf("store_flash_sales")), pricingCtrl.UpdateFlashSale)
+		protected.DELETE("pricing/flash-sales/:id", middleware.RequirePermission("pricing.edit"), middleware.RequireEntityStore("id", middleware.StoreOf("store_flash_sales")), pricingCtrl.DeleteFlashSale)
 
 		// Pricing config
-		protected.GET("pricing", pricingCtrl.GetAll)
-		protected.POST("pricing", pricingCtrl.Create)
-		protected.GET("pricing/:store_id", pricingCtrl.GetByStore)
-		protected.PUT("pricing/:store_id", pricingCtrl.UpdateConfig)
-		protected.DELETE("pricing/:store_id", pricingCtrl.Delete)
+		protected.GET("pricing", middleware.RequirePermission("pricing.view"), pricingCtrl.GetAll)
+		protected.POST("pricing", middleware.RequirePermission("pricing.edit"), middleware.RequireStoreInBody(), pricingCtrl.Create)
+		protected.GET("pricing/:store_id", middleware.RequirePermission("pricing.view"), middleware.RequireStoreParam("store_id"), pricingCtrl.GetByStore)
+		protected.PUT("pricing/:store_id", middleware.RequirePermission("pricing.edit"), middleware.RequireStoreParam("store_id"), pricingCtrl.UpdateConfig)
+		protected.DELETE("pricing/:store_id", middleware.RequirePermission("pricing.edit"), middleware.RequireStoreParam("store_id"), pricingCtrl.Delete)
 
 		// Happy Hour — Schedules
-		protected.POST("pricing/:store_id/happy-hour/schedules", pricingCtrl.AddSchedule)
-		protected.DELETE("pricing/:store_id/happy-hour/schedules/:id", pricingCtrl.DeleteSchedule)
+		protected.POST("pricing/:store_id/happy-hour/schedules", middleware.RequirePermission("pricing.edit"), middleware.RequireStoreParam("store_id"), pricingCtrl.AddSchedule)
+		protected.DELETE("pricing/:store_id/happy-hour/schedules/:id", middleware.RequirePermission("pricing.edit"), middleware.RequireStoreParam("store_id"), pricingCtrl.DeleteSchedule)
 
 		// Happy Hour — Prices
-		protected.GET("pricing/:store_id/happy-hour/prices", pricingCtrl.GetHappyHourPrices)
-		protected.PUT("pricing/:store_id/happy-hour/prices", pricingCtrl.UpsertHappyHourPrices)
+		protected.GET("pricing/:store_id/happy-hour/prices", middleware.RequirePermission("pricing.view"), middleware.RequireStoreParam("store_id"), pricingCtrl.GetHappyHourPrices)
+		protected.PUT("pricing/:store_id/happy-hour/prices", middleware.RequirePermission("pricing.edit"), middleware.RequireStoreParam("store_id"), pricingCtrl.UpsertHappyHourPrices)
 
 		// Package Prices
-		protected.GET("pricing/:store_id/packages", pricingCtrl.GetPackagePrices)
-		protected.PUT("pricing/:store_id/packages", pricingCtrl.UpsertPackagePrices)
-		protected.DELETE("pricing/:store_id/packages/:id", pricingCtrl.DeletePackagePrice)
+		protected.GET("pricing/:store_id/packages", middleware.RequirePermission("pricing.view"), middleware.RequireStoreParam("store_id"), pricingCtrl.GetPackagePrices)
+		protected.PUT("pricing/:store_id/packages", middleware.RequirePermission("pricing.edit"), middleware.RequireStoreParam("store_id"), pricingCtrl.UpsertPackagePrices)
+		protected.DELETE("pricing/:store_id/packages/:id", middleware.RequirePermission("pricing.edit"), middleware.RequireStoreParam("store_id"), pricingCtrl.DeletePackagePrice)
 
 		// Flash Sales (list + create dengan store_id)
-		protected.GET("pricing/:store_id/flash-sales", pricingCtrl.GetFlashSales)
-		protected.POST("pricing/:store_id/flash-sales", pricingCtrl.CreateFlashSale)
+		protected.GET("pricing/:store_id/flash-sales", middleware.RequirePermission("pricing.view"), middleware.RequireStoreParam("store_id"), pricingCtrl.GetFlashSales)
+		protected.POST("pricing/:store_id/flash-sales", middleware.RequirePermission("pricing.edit"), middleware.RequireStoreParam("store_id"), pricingCtrl.CreateFlashSale)
 
 		// ── Play Credits — Packages ───────────────────────────
 		// Note: "active" didaftarkan sebelum /:id agar tidak dianggap sebagai ID.
 		protected.GET("play-credits/packages", playCreditsCtrl.GetAllPackages)
 		protected.GET("play-credits/packages/active", playCreditsCtrl.GetActivePackages)
-		protected.POST("play-credits/packages", playCreditsCtrl.CreatePackage)
+		protected.POST("play-credits/packages", middleware.RequirePermission("play_credits.create"), playCreditsCtrl.CreatePackage)
 		protected.GET("play-credits/packages/:id", playCreditsCtrl.GetPackageByID)
-		protected.PUT("play-credits/packages/:id", playCreditsCtrl.UpdatePackage)
-		protected.DELETE("play-credits/packages/:id", playCreditsCtrl.DeletePackage)
+		protected.PUT("play-credits/packages/:id", middleware.RequirePermission("play_credits.edit"), playCreditsCtrl.UpdatePackage)
+		protected.DELETE("play-credits/packages/:id", middleware.RequirePermission("play_credits.edit"), playCreditsCtrl.DeletePackage)
 
 		// ── Play Credits — Member Credits ─────────────────────
-		protected.GET("play-credits/members", playCreditsCtrl.GetAllMemberCredits)
-		protected.POST("play-credits/members", playCreditsCtrl.AssignCredit)
-		protected.GET("play-credits/members/:id", playCreditsCtrl.GetCreditByID)
-		protected.PATCH("play-credits/members/:id/adjust", playCreditsCtrl.AdjustCredit)
-		protected.DELETE("play-credits/members/:id", playCreditsCtrl.DeleteCredit)
+		protected.GET("play-credits/members", middleware.RequirePermission("play_credits.view"), playCreditsCtrl.GetAllMemberCredits)
+		protected.POST("play-credits/members", middleware.RequirePermission("play_credits.create"), playCreditsCtrl.AssignCredit)
+		protected.GET("play-credits/members/:id", middleware.RequirePermission("play_credits.view"), playCreditsCtrl.GetCreditByID)
+		protected.PATCH("play-credits/members/:id/adjust", middleware.RequirePermission("play_credits.edit"), playCreditsCtrl.AdjustCredit)
+		protected.DELETE("play-credits/members/:id", middleware.RequirePermission("play_credits.edit"), playCreditsCtrl.DeleteCredit)
 
 		// ── Sales Summary ─────────────────────────────────────
-		protected.GET("sales/summary", salesCtrl.GetSummary)
-		protected.GET("sales/trend", salesCtrl.GetTrend)
-		protected.GET("sales/transactions", salesCtrl.GetTransactions)
+		protected.GET("sales/summary", middleware.RequirePermission("dashboard.view"), middleware.ScopeStoreQuery(), salesCtrl.GetSummary)
+		protected.GET("sales/trend", middleware.RequirePermission("dashboard.view"), middleware.ScopeStoreQuery(), salesCtrl.GetTrend)
+		protected.GET("sales/transactions", middleware.RequirePermission("dashboard.view"), middleware.ScopeStoreQuery(), salesCtrl.GetTransactions)
 
 		// ── Notification Templates ─────────────────────────────
 		// Note: rute statis (preview) didaftarkan SEBELUM /:key.
-		protected.GET("notification-templates", ntCtrl.GetAll)
-		protected.POST("notification-templates/preview", ntCtrl.Preview)
-		protected.GET("notification-templates/:key", ntCtrl.GetByKey)
-		protected.PUT("notification-templates/:key", ntCtrl.Update)
+		protected.GET("notification-templates", middleware.RequirePermission("settings.staff_role"), ntCtrl.GetAll)
+		protected.POST("notification-templates/preview", middleware.RequirePermission("settings.staff_role"), ntCtrl.Preview)
+		protected.GET("notification-templates/:key", middleware.RequirePermission("settings.staff_role"), ntCtrl.GetByKey)
+		protected.PUT("notification-templates/:key", middleware.RequirePermission("settings.staff_role"), ntCtrl.Update)
 
 		// ── Bookings ──────────────────────────────────────────
 		// Note: rute statis (dashboard, sessions-ending-soon, available-credits)
 		// didaftarkan SEBELUM /:id agar tidak dianggap sebagai ID oleh Gin.
-		protected.GET("bookings", bookingCtrl.GetAll)
-		protected.GET("bookings/dashboard", bookingCtrl.GetDashboard)
-		protected.GET("bookings/sessions-ending-soon", bookingCtrl.GetSessionsEndingSoon)
-		protected.GET("bookings/available-credits", bookingCtrl.GetAvailableCredits)
-		protected.POST("bookings", bookingCtrl.Create)
-		protected.GET("bookings/:id", bookingCtrl.GetByID)
-		protected.PATCH("bookings/:id/cancel", bookingCtrl.Cancel)
-		protected.PATCH("bookings/:id/complete", bookingCtrl.Complete)
+		protected.GET("bookings", middleware.RequirePermission("bookings.view"), middleware.ScopeStoreQuery(), bookingCtrl.GetAll)
+		protected.GET("bookings/dashboard", middleware.RequirePermission("bookings.view"), middleware.ScopeStoreQuery(), bookingCtrl.GetDashboard)
+		protected.GET("bookings/sessions-ending-soon", middleware.RequirePermission("bookings.view"), middleware.ScopeStoreQuery(), bookingCtrl.GetSessionsEndingSoon)
+		protected.GET("bookings/available-credits", middleware.RequirePermission("bookings.create"), middleware.ScopeStoreQuery(), bookingCtrl.GetAvailableCredits)
+		protected.POST("bookings", middleware.RequirePermission("bookings.create"), middleware.RequireStoreInBody(), bookingCtrl.Create)
+		protected.GET("bookings/:id", middleware.RequirePermission("bookings.view"), middleware.RequireEntityStore("id", middleware.StoreOf("bookings")), bookingCtrl.GetByID)
+		protected.PATCH("bookings/:id/cancel", middleware.RequirePermission("bookings.cancel"), middleware.RequireEntityStore("id", middleware.StoreOf("bookings")), bookingCtrl.Cancel)
+		protected.PATCH("bookings/:id/complete", middleware.RequirePermission("bookings.edit"), middleware.RequireEntityStore("id", middleware.StoreOf("bookings")), bookingCtrl.Complete)
 
 		// ── Vouchers ──────────────────────────────────────────
 		// Note: rute statis didaftarkan SEBELUM /:id
 		// agar Gin tidak menganggap path segment tersebut sebagai ID.
-		protected.GET("vouchers", voucherCtrl.GetAll)
-		protected.GET("vouchers/generate-code", voucherCtrl.GenerateCode)
-		protected.GET("vouchers/customer-available", voucherCtrl.GetCustomerAvailable)
-		protected.GET("vouchers/recipient-count", voucherCtrl.GetRecipientCount)
-		protected.POST("vouchers/validate", voucherCtrl.Validate)
-		protected.POST("vouchers", voucherCtrl.Create)
-		protected.GET("vouchers/:id", voucherCtrl.GetByID)
-		protected.PUT("vouchers/:id", voucherCtrl.Update)
-		protected.DELETE("vouchers/:id", voucherCtrl.Delete)
+		protected.GET("vouchers", middleware.RequirePermission("promotion.view"), voucherCtrl.GetAll)
+		protected.GET("vouchers/generate-code", middleware.RequirePermission("promotion.create"), voucherCtrl.GenerateCode)
+		protected.GET("vouchers/customer-available", middleware.RequirePermission("bookings.create", "promotion.view"), voucherCtrl.GetCustomerAvailable)
+		protected.GET("vouchers/recipient-count", middleware.RequirePermission("promotion.create", "promotion.edit"), voucherCtrl.GetRecipientCount)
+		protected.POST("vouchers/validate", middleware.RequirePermission("bookings.create"), voucherCtrl.Validate)
+		protected.POST("vouchers", middleware.RequirePermission("promotion.create"), voucherCtrl.Create)
+		protected.GET("vouchers/:id", middleware.RequirePermission("promotion.view"), voucherCtrl.GetByID)
+		protected.PUT("vouchers/:id", middleware.RequirePermission("promotion.edit"), voucherCtrl.Update)
+		protected.DELETE("vouchers/:id", middleware.RequirePermission("promotion.edit"), voucherCtrl.Delete)
 
 		// ── Customers ─────────────────────────────────────────
-		protected.GET("customers", customerCtrl.GetAll)
-		protected.POST("customers", customerCtrl.Create)
-		protected.GET("customers/:id", customerCtrl.GetByID)
-		protected.PUT("customers/:id", customerCtrl.Update)
-		protected.PATCH("customers/:id/notes", customerCtrl.UpdateNotes)
-		protected.DELETE("customers/:id", customerCtrl.Delete)
-		protected.POST("customers/:id/resend-password", customerCtrl.ResendPassword)
+		protected.GET("customers", middleware.RequirePermission("customers.view", "bookings.create"), customerCtrl.GetAll)
+		protected.POST("customers", middleware.RequirePermission("customers.create"), customerCtrl.Create)
+		protected.GET("customers/:id", middleware.RequirePermission("customers.view", "bookings.create"), customerCtrl.GetByID)
+		protected.PUT("customers/:id", middleware.RequirePermission("customers.edit"), customerCtrl.Update)
+		protected.PATCH("customers/:id/notes", middleware.RequirePermission("customers.edit"), customerCtrl.UpdateNotes)
+		protected.DELETE("customers/:id", middleware.RequirePermission("customers.edit"), customerCtrl.Delete)
+		protected.POST("customers/:id/resend-password", middleware.RequirePermission("customers.edit"), customerCtrl.ResendPassword)
 
 		// ── Global Holidays ───────────────────────────────────
 		protected.GET("global-holidays", globalHolidayCtrl.GetAll)
-		protected.POST("global-holidays", globalHolidayCtrl.Create)
-		protected.PUT("global-holidays/:id", globalHolidayCtrl.Update)
-		protected.DELETE("global-holidays/:id", globalHolidayCtrl.Delete)
+		protected.POST("global-holidays", middleware.RequirePermission("settings.branches"), globalHolidayCtrl.Create)
+		protected.PUT("global-holidays/:id", middleware.RequirePermission("settings.branches"), globalHolidayCtrl.Update)
+		protected.DELETE("global-holidays/:id", middleware.RequirePermission("settings.branches"), globalHolidayCtrl.Delete)
 
 		// ── Event Bookings ────────────────────────────────────
 		// Note: rute statis (dashboard, preview-price) didaftarkan SEBELUM /:id
 		// agar Gin tidak menganggap path segment tersebut sebagai ID.
-		protected.GET("event-bookings", eventCtrl.GetAll)
-		protected.POST("event-bookings", eventCtrl.Create)
-		protected.GET("event-bookings/dashboard", eventCtrl.GetForDashboard)
-		protected.GET("event-bookings/preview-price", eventCtrl.PreviewPrice)
-		protected.GET("event-bookings/:id", eventCtrl.GetByID)
-		protected.PATCH("event-bookings/:id/cancel", eventCtrl.Cancel)
+		protected.GET("event-bookings", middleware.RequirePermission("bookings.view"), middleware.ScopeStoreQuery(), eventCtrl.GetAll)
+		protected.POST("event-bookings", middleware.RequirePermission("bookings.create"), middleware.RequireStoreInBody(), eventCtrl.Create)
+		protected.GET("event-bookings/dashboard", middleware.RequirePermission("bookings.view"), middleware.ScopeStoreQuery(), eventCtrl.GetForDashboard)
+		protected.GET("event-bookings/preview-price", middleware.RequirePermission("bookings.create"), middleware.ScopeStoreQuery(), eventCtrl.PreviewPrice)
+		protected.GET("event-bookings/:id", middleware.RequirePermission("bookings.view"), middleware.RequireEntityStore("id", middleware.StoreOf("event_bookings")), eventCtrl.GetByID)
+		protected.PATCH("event-bookings/:id/cancel", middleware.RequirePermission("bookings.cancel"), middleware.RequireEntityStore("id", middleware.StoreOf("event_bookings")), eventCtrl.Cancel)
 
 		// ── Event Pricing (per store) ─────────────────────────
 		// Pakai :id (sama dengan stores/:id) agar tidak conflict di Gin router tree.
-		protected.GET("stores/:id/event-price", eventCtrl.GetEventPrice)
-		protected.PUT("stores/:id/event-price", eventCtrl.UpsertEventPrice)
+		protected.GET("stores/:id/event-price", middleware.RequireStoreParam("id"), eventCtrl.GetEventPrice)
+		protected.PUT("stores/:id/event-price", middleware.RequirePermission("pricing.edit"), middleware.RequireStoreParam("id"), eventCtrl.UpsertEventPrice)
 
 		// ── Banners (admin) ───────────────────────────────────
 		// Note: rute statis (admin, reorder) didaftarkan SEBELUM /:id
 		// agar Gin tidak menganggap "admin" atau "reorder" sebagai ID.
 		// GET public banners ada di /public group di bawah.
-		protected.GET("banners/admin", bannerCtrl.GetAllAdmin)
-		protected.PATCH("banners/reorder", bannerCtrl.Reorder)
-		protected.POST("banners", bannerCtrl.Create)
-		protected.PUT("banners/:id", bannerCtrl.Update)
-		protected.DELETE("banners/:id", bannerCtrl.Delete)
-		protected.PATCH("banners/:id/toggle", bannerCtrl.ToggleActive)
+		protected.GET("banners/admin", middleware.RequirePermission("settings.branches"), bannerCtrl.GetAllAdmin)
+		protected.PATCH("banners/reorder", middleware.RequirePermission("settings.branches"), bannerCtrl.Reorder)
+		protected.POST("banners", middleware.RequirePermission("settings.branches"), bannerCtrl.Create)
+		protected.PUT("banners/:id", middleware.RequirePermission("settings.branches"), bannerCtrl.Update)
+		protected.DELETE("banners/:id", middleware.RequirePermission("settings.branches"), bannerCtrl.Delete)
+		protected.PATCH("banners/:id/toggle", middleware.RequirePermission("settings.branches"), bannerCtrl.ToggleActive)
 
 		// ── FnB — Admin ───────────────────────────────────────────────
 		// Note: rute statis (sync-moka) didaftarkan SEBELUM /:id
 		// agar Gin tidak menganggapnya sebagai category/item ID.
-		protected.GET("fnb/categories",          fnbCtrl.AdminGetCategories)
-		protected.POST("fnb/categories",         fnbCtrl.AdminCreateCategory)
-		protected.PUT("fnb/categories/:id",      fnbCtrl.AdminUpdateCategory)
-		protected.DELETE("fnb/categories/:id",   fnbCtrl.AdminDeleteCategory)
-		protected.GET("fnb/items",               fnbCtrl.AdminGetItems)
-		protected.POST("fnb/items",              fnbCtrl.AdminCreateItem)
-		protected.PUT("fnb/items/:id",           fnbCtrl.AdminUpdateItem)
-		protected.GET("fnb/orders",              fnbCtrl.AdminGetOrders)
-		protected.PUT("fnb/orders/:id/status",   fnbCtrl.AdminUpdateOrderStatus)
-		protected.POST("fnb/sync-moka",          fnbCtrl.AdminSyncMoka)
+		protected.GET("fnb/categories", middleware.RequirePermission("orders_fnb.view"), fnbCtrl.AdminGetCategories)
+		protected.POST("fnb/categories", middleware.RequirePermission("orders_fnb.edit"), fnbCtrl.AdminCreateCategory)
+		protected.PUT("fnb/categories/:id", middleware.RequirePermission("orders_fnb.edit"), fnbCtrl.AdminUpdateCategory)
+		protected.DELETE("fnb/categories/:id", middleware.RequirePermission("orders_fnb.edit"), fnbCtrl.AdminDeleteCategory)
+		protected.GET("fnb/items", middleware.RequirePermission("orders_fnb.view"), fnbCtrl.AdminGetItems)
+		protected.POST("fnb/items", middleware.RequirePermission("orders_fnb.edit"), fnbCtrl.AdminCreateItem)
+		protected.PUT("fnb/items/:id", middleware.RequirePermission("orders_fnb.edit"), fnbCtrl.AdminUpdateItem)
+		protected.GET("fnb/orders", middleware.RequirePermission("orders_fnb.view"), middleware.ScopeStoreQuery(), fnbCtrl.AdminGetOrders)
+		protected.PUT("fnb/orders/:id/status", middleware.RequirePermission("orders_fnb.edit"), middleware.RequireEntityStore("id", middleware.StoreOf("fnb_orders")), fnbCtrl.AdminUpdateOrderStatus)
+		protected.POST("fnb/sync-moka", middleware.RequirePermission("orders_fnb.edit"), fnbCtrl.AdminSyncMoka)
 	}
 
 	// ── Customer auth (tidak perlu JWT) ──────────────────────────
 	customerAuth := api.Group("/customer")
 	{
-		customerAuth.POST("/login",                          authLimiter, customerAppCtrl.Login)
-		customerAuth.POST("/forgot-password",                authLimiter, customerAppCtrl.ForgotPassword)
-		customerAuth.GET("/reset-password/:token/validate",  customerAppCtrl.ValidateResetToken)
-		customerAuth.POST("/reset-password/:token",          authLimiter, customerAppCtrl.ResetPassword)
+		customerAuth.POST("/login", authLimiter, customerAppCtrl.Login)
+		customerAuth.POST("/forgot-password", authLimiter, customerAppCtrl.ForgotPassword)
+		customerAuth.GET("/reset-password/:token/validate", customerAppCtrl.ValidateResetToken)
+		customerAuth.POST("/reset-password/:token", authLimiter, customerAppCtrl.ResetPassword)
 	}
 
 	// ── Customer protected (perlu customer JWT) ───────────────────
 	customerProtected := api.Group("/customer")
 	customerProtected.Use(middleware.CustomerAuth())
 	{
-		customerProtected.GET("/me",                    customerAppCtrl.Me)
-		customerProtected.GET("/room-recommendations",  customerAppCtrl.RoomRecommendations)
-		customerProtected.POST("/logout",               customerAppCtrl.Logout)
-		customerProtected.PUT("/profile",               customerAppCtrl.UpdateProfile)
-		customerProtected.PUT("/change-password",       customerAppCtrl.ChangePassword)
-		customerProtected.GET("/credits/expiring",      customerAppCtrl.CreditsExpiring)
+		customerProtected.GET("/me", customerAppCtrl.Me)
+		customerProtected.GET("/room-recommendations", customerAppCtrl.RoomRecommendations)
+		customerProtected.POST("/logout", customerAppCtrl.Logout)
+		customerProtected.PUT("/profile", customerAppCtrl.UpdateProfile)
+		customerProtected.PUT("/change-password", customerAppCtrl.ChangePassword)
+		customerProtected.GET("/credits/expiring", customerAppCtrl.CreditsExpiring)
 
 		// ── Customer Bookings ─────────────────────────────────────────────────
 		// Note: rute statis (initiate) didaftarkan SEBELUM /:id agar tidak
 		// dianggap sebagai hold_id/booking_id oleh Gin.
-		customerProtected.POST("/bookings/initiate",             bookingCustomerCtrl.InitiateBooking)
-		customerProtected.GET("/bookings",                       bookingCustomerCtrl.GetMyBookings)
-		customerProtected.GET("/bookings/:id",                   bookingCustomerCtrl.GetMyBookingByID)
+		customerProtected.POST("/bookings/initiate", bookingCustomerCtrl.InitiateBooking)
+		customerProtected.GET("/bookings", bookingCustomerCtrl.GetMyBookings)
+		customerProtected.GET("/bookings/:id", bookingCustomerCtrl.GetMyBookingByID)
 		// Mock payment — hanya aktif saat XENDIT_SECRET_KEY kosong
-		customerProtected.POST("/bookings/:hold_id/mock-confirm",              bookingCustomerCtrl.MockConfirm)
+		if utils.XenditMockMode() {
+			customerProtected.POST("/bookings/:hold_id/mock-confirm", bookingCustomerCtrl.MockConfirm)
+		}
 
 		// ── Play Credits Purchase ─────────────────────────────────────────────
-		customerProtected.POST("/play-credits/purchase/initiate",                customerAppCtrl.InitiatePlayCreditsPurchase)
-		customerProtected.POST("/play-credits/purchase/:intent_id/mock-confirm", customerAppCtrl.MockConfirmPlayCredits)
+		customerProtected.POST("/play-credits/purchase/initiate", customerAppCtrl.InitiatePlayCreditsPurchase)
+		if utils.XenditMockMode() {
+			customerProtected.POST("/play-credits/purchase/:intent_id/mock-confirm", customerAppCtrl.MockConfirmPlayCredits)
+		}
 
 		// ── My Data ───────────────────────────────────────────────────────────
-		customerProtected.GET("/my-credits",                                     customerAppCtrl.GetMyCredits)
-		customerProtected.GET("/vouchers/available",                             customerAppCtrl.GetMyVouchers)
+		customerProtected.GET("/my-credits", customerAppCtrl.GetMyCredits)
+		customerProtected.GET("/vouchers/available", customerAppCtrl.GetMyVouchers)
 
 		// ── Customer Event Booking ────────────────────────────────────────────
 		// Note: rute statis (initiate) didaftarkan SEBELUM /:event_id
-		customerProtected.POST("/event-bookings/initiate",                       customerAppCtrl.InitiateEventBooking)
-		customerProtected.POST("/event-bookings/:event_id/mock-confirm",         customerAppCtrl.MockConfirmEventBooking)
+		customerProtected.POST("/event-bookings/initiate", customerAppCtrl.InitiateEventBooking)
+		if utils.XenditMockMode() {
+			customerProtected.POST("/event-bookings/:event_id/mock-confirm", customerAppCtrl.MockConfirmEventBooking)
+		}
 
 		// ── FnB — Customer ────────────────────────────────────────────────────
-		customerProtected.POST("/fnb/orders",  fnbCtrl.CustomerCreateOrder)
-		customerProtected.GET("/fnb/orders",   fnbCtrl.CustomerGetMyOrders)
+		customerProtected.POST("/fnb/orders", fnbCtrl.CustomerCreateOrder)
+		customerProtected.GET("/fnb/orders", fnbCtrl.CustomerGetMyOrders)
 	}
 
 	// ── Public (tanpa auth, untuk customer web) ───────────────────
 	publicGroup := api.Group("/public")
 	{
-		publicGroup.GET("/banners",                     bannerCtrl.GetAllPublic)
-		publicGroup.GET("/banners/:id",                 bannerCtrl.GetByID)
-		publicGroup.GET("/stores",                      customerAppCtrl.PublicGetStores)
-		publicGroup.GET("/stores/:id",                  customerAppCtrl.PublicGetStoreByID)
-		publicGroup.GET("/room-templates",              customerAppCtrl.PublicGetRoomTemplates)
-		publicGroup.GET("/room-templates/:id",          customerAppCtrl.PublicGetRoomTemplateByID)
-		publicGroup.GET("/booking/availability",          bookingCustomerCtrl.GetAvailability)
-		publicGroup.GET("/booking/slots",                 customerAppCtrl.GetBookingSlots)
-		publicGroup.GET("/play-credits/packages",         customerAppCtrl.PublicGetPlayCreditsPackages)
-		publicGroup.GET("/event-booking/availability",    customerAppCtrl.CheckEventAvailability)
-		publicGroup.GET("/fnb/menu",                      fnbCtrl.GetPublicMenu)
+		publicGroup.GET("/banners", bannerCtrl.GetAllPublic)
+		publicGroup.GET("/banners/:id", bannerCtrl.GetByID)
+		publicGroup.GET("/stores", customerAppCtrl.PublicGetStores)
+		publicGroup.GET("/stores/:id", customerAppCtrl.PublicGetStoreByID)
+		publicGroup.GET("/room-templates", customerAppCtrl.PublicGetRoomTemplates)
+		publicGroup.GET("/room-templates/:id", customerAppCtrl.PublicGetRoomTemplateByID)
+		publicGroup.GET("/booking/availability", bookingCustomerCtrl.GetAvailability)
+		publicGroup.GET("/booking/quote", bookingCustomerCtrl.GetQuote)
+		publicGroup.GET("/booking/slots", customerAppCtrl.GetBookingSlots)
+		publicGroup.GET("/play-credits/packages", customerAppCtrl.PublicGetPlayCreditsPackages)
+		publicGroup.GET("/event-booking/availability", customerAppCtrl.CheckEventAvailability)
+		publicGroup.GET("/fnb/menu", fnbCtrl.GetPublicMenu)
 	}
 
 	// ── Xendit Webhook (tanpa auth, verifikasi via x-callback-token) ──────────

@@ -3,6 +3,8 @@ package utils
 import (
 	"fmt"
 	"html"
+	"mime"
+	"net/mail"
 	"net/smtp"
 	"os"
 	"strconv"
@@ -43,15 +45,27 @@ func loadSMTP() smtpConfig {
 func dispatch(toEmail, toName, subject, htmlContent string) error {
 	cfg := loadSMTP()
 	auth := smtp.PlainAuth("", cfg.FromEmail, cfg.Password, cfg.Host)
-	msg := fmt.Sprintf(
-		"From: %s <%s>\r\nTo: %s <%s>\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n%s",
-		cfg.SenderName, cfg.FromEmail,
-		toName, toEmail,
-		subject,
-		htmlContent,
-	)
+	msg := buildMessage(cfg.SenderName, cfg.FromEmail, toName, toEmail, subject, htmlContent)
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
 	return smtp.SendMail(addr, auth, cfg.FromEmail, []string{toEmail}, []byte(msg))
+}
+
+// buildMessage menyusun pesan MIME. Nama & subject bisa berasal dari input customer
+// (nama profil), jadi CR/LF dibuang supaya tidak bisa menyisipkan header baru,
+// lalu di-encode RFC 2047 agar nama non-ASCII tampil benar.
+func buildMessage(fromName, fromEmail, toName, toEmail, subject, htmlContent string) string {
+	from := (&mail.Address{Name: stripCRLF(fromName), Address: fromEmail}).String()
+	to := (&mail.Address{Name: stripCRLF(toName), Address: toEmail}).String()
+	return "From: " + from + "\r\n" +
+		"To: " + to + "\r\n" +
+		"Subject: " + mime.QEncoding.Encode("utf-8", stripCRLF(subject)) + "\r\n" +
+		"MIME-Version: 1.0\r\n" +
+		"Content-Type: text/html; charset=UTF-8\r\n\r\n" +
+		htmlContent
+}
+
+func stripCRLF(s string) string {
+	return strings.NewReplacer("\r", " ", "\n", " ").Replace(s)
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────

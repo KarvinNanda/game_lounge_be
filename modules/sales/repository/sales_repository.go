@@ -42,7 +42,7 @@ func CreditsRevenue(dateFrom, dateTo, storeID string) float64 {
 	var result float64
 	q := config.DB.Table("customer_play_credits").
 		Select("COALESCE(SUM(payment_amount), 0)").
-		Where("deleted_at IS NULL AND payment_amount IS NOT NULL").
+		Where("customer_play_credits.deleted_at IS NULL AND payment_amount IS NOT NULL").
 		Where("DATE(purchased_at) BETWEEN ? AND ?", dateFrom, dateTo)
 	if storeID != "" {
 		q = q.Joins("JOIN play_credits_packages p ON p.id = customer_play_credits.package_id").
@@ -59,7 +59,7 @@ func CreditsRevenue(dateFrom, dateTo, storeID string) float64 {
 func CreditsCount(dateFrom, dateTo, storeID string) int64 {
 	var result int64
 	q := config.DB.Table("customer_play_credits").
-		Where("deleted_at IS NULL AND payment_amount IS NOT NULL").
+		Where("customer_play_credits.deleted_at IS NULL AND payment_amount IS NOT NULL").
 		Where("DATE(purchased_at) BETWEEN ? AND ?", dateFrom, dateTo)
 	if storeID != "" {
 		q = q.Joins("JOIN play_credits_packages p ON p.id = customer_play_credits.package_id").
@@ -75,18 +75,22 @@ func CreditsCount(dateFrom, dateTo, storeID string) int64 {
 // ── Revenue by Branch ─────────────────────────────────────────────────────────
 
 // RevenueByBranch menghitung pendapatan booking per cabang.
-func RevenueByBranch(dateFrom, dateTo string) []dto.RevenueByBranch {
+// storeID != "" → hanya cabang itu (staff yang dibatasi ke cabang tertentu).
+func RevenueByBranch(dateFrom, dateTo, storeID string) []dto.RevenueByBranch {
 	var results []struct {
 		StoreID   string
 		StoreName string
 		Revenue   float64
 	}
 
-	config.DB.Table("bookings b").
+	q := config.DB.Table("bookings b").
 		Select("b.store_id, s.name as store_name, COALESCE(SUM(b.total_price), 0) as revenue").
 		Joins("JOIN stores s ON s.id = b.store_id AND s.deleted_at IS NULL").
-		Where("b.status != 'cancelled' AND b.booking_date BETWEEN ? AND ?", dateFrom, dateTo).
-		Group("b.store_id, s.name").
+		Where("b.status != 'cancelled' AND b.booking_date BETWEEN ? AND ?", dateFrom, dateTo)
+	if storeID != "" {
+		q = q.Where("b.store_id = ?", storeID)
+	}
+	q.Group("b.store_id, s.name").
 		Order("revenue DESC").
 		Scan(&results)
 
@@ -203,7 +207,7 @@ func SalesTrend(dateFrom, dateTo, storeID, granularity string) []dto.TrendPoint 
 	cq := config.DB.Table("customer_play_credits").
 		Select(fmt.Sprintf("%s as label, %s as group_by, COALESCE(SUM(payment_amount), 0) as revenue",
 			cLabelExpr, cGroupExpr)).
-		Where("deleted_at IS NULL AND payment_amount IS NOT NULL").
+		Where("customer_play_credits.deleted_at IS NULL AND payment_amount IS NOT NULL").
 		Where("DATE(purchased_at) BETWEEN ? AND ?", dateFrom, dateTo)
 	if storeID != "" {
 		cq = cq.Joins("JOIN play_credits_packages p ON p.id = customer_play_credits.package_id").
@@ -366,7 +370,7 @@ func GetTransactions(dateFrom, dateTo, storeID, txType string, page, perPage int
 		bq.Count(&total)
 	case txType == "play_credits":
 		cq := config.DB.Table("customer_play_credits").
-			Where("deleted_at IS NULL AND payment_amount IS NOT NULL AND DATE(purchased_at) BETWEEN ? AND ?", dateFrom, dateTo)
+			Where("customer_play_credits.deleted_at IS NULL AND payment_amount IS NOT NULL AND DATE(purchased_at) BETWEEN ? AND ?", dateFrom, dateTo)
 		if storeID != "" {
 			cq = cq.Joins("JOIN play_credits_packages p ON p.id = customer_play_credits.package_id").
 				Where(`p.apply_to_all_stores = true OR EXISTS (
@@ -377,12 +381,21 @@ func GetTransactions(dateFrom, dateTo, storeID, txType string, page, perPage int
 		cq.Count(&total)
 	default: // all
 		var bc, cc int64
-		config.DB.Table("bookings").
-			Where("status != 'cancelled' AND payment_method = 'cash' AND booking_date BETWEEN ? AND ?", dateFrom, dateTo).
-			Count(&bc)
-		config.DB.Table("customer_play_credits").
-			Where("deleted_at IS NULL AND payment_amount IS NOT NULL AND DATE(purchased_at) BETWEEN ? AND ?", dateFrom, dateTo).
-			Count(&cc)
+		bq := config.DB.Table("bookings").
+			Where("status != 'cancelled' AND payment_method = 'cash' AND booking_date BETWEEN ? AND ?", dateFrom, dateTo)
+		cq := config.DB.Table("customer_play_credits").
+			Where("customer_play_credits.deleted_at IS NULL AND payment_amount IS NOT NULL AND DATE(purchased_at) BETWEEN ? AND ?", dateFrom, dateTo)
+		// Filter cabang juga berlaku untuk total (dulu diabaikan di cabang ini).
+		if storeID != "" {
+			bq = bq.Where("store_id = ?", storeID)
+			cq = cq.Joins("JOIN play_credits_packages p ON p.id = customer_play_credits.package_id").
+				Where(`p.apply_to_all_stores = true OR EXISTS (
+					SELECT 1 FROM play_credits_package_stores pcps
+					WHERE pcps.package_id = p.id AND pcps.store_id = ?
+				)`, storeID)
+		}
+		bq.Count(&bc)
+		cq.Count(&cc)
 		total = bc + cc
 	}
 
