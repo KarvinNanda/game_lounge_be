@@ -130,7 +130,8 @@ func ChangePassword(c *gin.Context) {
 	}
 
 	if customer.PasswordHash == nil || !utils.CheckPassword(req.OldPassword, *customer.PasswordHash) {
-		utils.ResponseError(c, http.StatusUnauthorized, "Password lama tidak sesuai")
+		// 400, bukan 401: 401 berarti sesi invalid dan membuat FE me-logout customer.
+		utils.ResponseError(c, http.StatusBadRequest, "Password lama tidak sesuai")
 		return
 	}
 

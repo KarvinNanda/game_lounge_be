@@ -14,17 +14,27 @@ func GetAllAdmin() ([]models.Banner, error) {
 }
 
 // GetAllActive mengambil banner aktif saja — dipakai customer (public).
-func GetAllActive() ([]models.Banner, error) {
-	return repository.FindAllActive()
+func GetAllActive() ([]dto.PublicBanner, error) {
+	banners, err := repository.FindAllActive()
+	if err != nil {
+		return nil, err
+	}
+	result := make([]dto.PublicBanner, 0, len(banners))
+	for _, b := range banners {
+		result = append(result, dto.ToPublicBanner(b))
+	}
+	return result, nil
 }
 
-// GetByID mengambil satu banner berdasarkan ID.
-func GetByID(id uint) (*models.Banner, error) {
-	b, err := repository.FindByID(id)
+// GetActiveByID mengambil satu banner aktif — dipakai customer (public).
+// Banner nonaktif = draft, tidak boleh bisa dibaca publik lewat ID.
+func GetActiveByID(id uint) (*dto.PublicBanner, error) {
+	b, err := repository.FindActiveByID(id)
 	if err != nil {
 		return nil, errors.New("banner tidak ditemukan")
 	}
-	return b, nil
+	pb := dto.ToPublicBanner(*b)
+	return &pb, nil
 }
 
 // Create membuat banner baru.

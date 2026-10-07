@@ -57,6 +57,8 @@ func SetupRouter() *gin.Engine {
 	// Rate limiter untuk endpoint sensitif (login, forgot password):
 	// max 10 request per menit per IP per endpoint.
 	authLimiter := middleware.RateLimit(10, time.Minute)
+	// Polling halaman payment success (~11 request / 20 detik) + ruang untuk retry.
+	pollLimiter := middleware.RateLimit(30, time.Minute)
 
 	// ── Health check ──────────────────────────────────────────
 	r.GET("/health", func(c *gin.Context) {
@@ -302,7 +304,7 @@ func SetupRouter() *gin.Engine {
 		customerProtected.GET("/room-recommendations", customerAppCtrl.RoomRecommendations)
 		customerProtected.POST("/logout", customerAppCtrl.Logout)
 		customerProtected.PUT("/profile", customerAppCtrl.UpdateProfile)
-		customerProtected.PUT("/change-password", customerAppCtrl.ChangePassword)
+		customerProtected.PUT("/change-password", authLimiter, customerAppCtrl.ChangePassword) // batasi tebakan password lama
 		customerProtected.GET("/credits/expiring", customerAppCtrl.CreditsExpiring)
 
 		// ── Customer Bookings ─────────────────────────────────────────────────
@@ -310,6 +312,7 @@ func SetupRouter() *gin.Engine {
 		// dianggap sebagai hold_id/booking_id oleh Gin.
 		customerProtected.POST("/bookings/initiate", bookingCustomerCtrl.InitiateBooking)
 		customerProtected.GET("/bookings", bookingCustomerCtrl.GetMyBookings)
+		customerProtected.GET("/bookings/by-hold/:hold_id", pollLimiter, bookingCustomerCtrl.GetMyBookingByHold)
 		customerProtected.GET("/bookings/:id", bookingCustomerCtrl.GetMyBookingByID)
 		// Mock payment — hanya aktif saat XENDIT_SECRET_KEY kosong
 		if utils.XenditMockMode() {
@@ -342,7 +345,7 @@ func SetupRouter() *gin.Engine {
 	publicGroup := api.Group("/public")
 	{
 		publicGroup.GET("/banners", bannerCtrl.GetAllPublic)
-		publicGroup.GET("/banners/:id", bannerCtrl.GetByID)
+		publicGroup.GET("/banners/:id", bannerCtrl.GetPublicByID)
 		publicGroup.GET("/stores", customerAppCtrl.PublicGetStores)
 		publicGroup.GET("/stores/:id", customerAppCtrl.PublicGetStoreByID)
 		publicGroup.GET("/room-templates", customerAppCtrl.PublicGetRoomTemplates)
@@ -352,6 +355,7 @@ func SetupRouter() *gin.Engine {
 		publicGroup.GET("/booking/slots", customerAppCtrl.GetBookingSlots)
 		publicGroup.GET("/play-credits/packages", customerAppCtrl.PublicGetPlayCreditsPackages)
 		publicGroup.GET("/event-booking/availability", customerAppCtrl.CheckEventAvailability)
+		publicGroup.GET("/event-booking/quote", customerAppCtrl.QuoteEventBooking)
 		publicGroup.GET("/fnb/menu", fnbCtrl.GetPublicMenu)
 	}
 

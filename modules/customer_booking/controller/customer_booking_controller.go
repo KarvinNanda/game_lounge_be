@@ -156,6 +156,7 @@ func XenditWebhook(c *gin.Context) {
 }
 
 // GetMyBookings mengambil list booking milik customer yang sedang login.
+// Query: page, per_page (maks 50), status (opsional, dipisah koma: upcoming,ongoing).
 func GetMyBookings(c *gin.Context) {
 	page, _    := strconv.Atoi(c.DefaultQuery("page", "1"))
 	perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "10"))
@@ -166,7 +167,13 @@ func GetMyBookings(c *gin.Context) {
 		perPage = 10
 	}
 
-	bookings, total, err := service.GetCustomerBookings(c.GetString("customer_id"), page, perPage)
+	statuses, err := parseStatusFilter(c.Query("status"))
+	if err != nil {
+		utils.ResponseError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	bookings, total, err := service.GetCustomerBookings(c.GetString("customer_id"), statuses, page, perPage)
 	if err != nil {
 		utils.ResponseError(c, http.StatusInternalServerError, "Gagal mengambil data booking")
 		return
@@ -249,4 +256,41 @@ func MockConfirm(c *gin.Context) {
 		"booking_code": booking.BookingCode,
 		"booking_id":   booking.ID,
 	})
+}
+
+// parseStatusFilter membaca ?status=upcoming,ongoing. Kosong = semua status.
+func parseStatusFilter(raw string) ([]string, error) {
+	var statuses []string
+	for _, st := range strings.Split(raw, ",") {
+		st = strings.TrimSpace(st)
+		if st == "" {
+			continue
+		}
+		switch st {
+		case "upcoming", "ongoing", "completed", "cancelled":
+			statuses = append(statuses, st)
+		default:
+			return nil, errors.New("status tidak valid (upcoming, ongoing, completed, cancelled)")
+		}
+	}
+	return statuses, nil
+}
+
+// GetMyBookingByHold — GET /customer/bookings/by-hold/:hold_id
+// Dipakai halaman payment success (redirect Xendit membawa hold_id) untuk polling
+// status: pending → confirmed (+ booking_code) atau expired.
+// Hold milik customer lain dijawab 404 yang sama dengan ID tidak dikenal,
+// supaya endpoint ini tidak bisa dipakai mengecek keberadaan sebuah hold.
+func GetMyBookingByHold(c *gin.Context) {
+	status, err := service.GetHoldStatus(c.Param("hold_id"), c.GetString("customer_id"))
+	if errors.Is(err, service.ErrHoldNotFound) {
+		utils.ResponseError(c, http.StatusNotFound, "Pembayaran tidak ditemukan")
+		return
+	}
+	if err != nil {
+		log.Printf("[HOLD STATUS] hold=%s: %v", c.Param("hold_id"), err)
+		utils.ResponseError(c, http.StatusInternalServerError, "Gagal mengambil status pembayaran")
+		return
+	}
+	utils.ResponseSuccess(c, http.StatusOK, "OK", status)
 }

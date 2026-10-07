@@ -30,6 +30,13 @@ func FindByID(id uint) (*models.Banner, error) {
 	return &banner, err
 }
 
+// FindActiveByID mengambil satu banner aktif (public endpoint).
+func FindActiveByID(id uint) (*models.Banner, error) {
+	var banner models.Banner
+	err := config.DB.Where("id = ? AND is_active = true AND deleted_at IS NULL", id).First(&banner).Error
+	return &banner, err
+}
+
 // Create menyimpan banner baru.
 // Workaround GORM zero-value bool: jika IsActive=false, lakukan explicit update
 // setelah create karena GORM akan skip field false saat INSERT (default:true di DB).
