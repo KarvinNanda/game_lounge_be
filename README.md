@@ -1,26 +1,26 @@
 # Game Lounge Backend API
 
-REST API untuk manajemen game lounge — mengelola store, staff, room template, fasilitas, pricing, booking, play credits, voucher, customer, dan laporan penjualan.
+REST API for game lounge management: stores, staff, room templates, facilities, pricing, bookings, play credits, vouchers, customers, and sales reports.
 
 **Tech Stack:** Go · Gin · GORM · MySQL · JWT · SMTP
 
-**Fitur utama:** Auth · Roles & Staff · Store & Room · Pricing Engine (HH/Package/Flash Sale) · Booking · Event Booking · Play Credits · Voucher · Customer · Sales Report · Admin Recovery (forgot password)
+**Main features:** Auth · Roles & Staff · Store & Room · Pricing Engine (HH/Package/Flash Sale) · Booking · Event Booking · Play Credits · Voucher · Customer · Sales Report · Admin Recovery (forgot password)
 
 ---
 
-## Prasyarat
+## Prerequisites
 
-| Tool | Versi minimal |
-|------|--------------|
+| Tool | Minimum version |
+|------|-----------------|
 | Go | 1.21+ |
 | MySQL | 8.0+ |
 | Git | — |
 
 ---
 
-## Setup Project
+## Project Setup
 
-### 1. Clone repository
+### 1. Clone the repository
 
 ```bash
 git clone <repo-url>
@@ -33,15 +33,15 @@ cd game_lounge_be
 go mod tidy
 ```
 
-### 3. Buat file `.env`
+### 3. Create the `.env` file
 
-Buat file `.env` di **root folder project** (sejajar dengan folder `cmd/`):
+Create `.env` in the **project root** (next to the `cmd/` folder):
 
 ```env
 # App
 APP_PORT=8080
-COOKIE_SECURE=false          # dev lokal via http; production: hapus (default true)
-# APP_ENV=production         # production: server menolak start jika config keamanan kosong (lihat .env.example)
+COOKIE_SECURE=false          # local dev over http; production: remove it (default true)
+# APP_ENV=production         # production: the server refuses to start if security config is empty (see .env.example)
 
 # Database
 DB_HOST=127.0.0.1
@@ -51,70 +51,70 @@ DB_PASSWORD=your_password
 DB_NAME=game_lounge_db
 
 # JWT
-JWT_SECRET=ganti_dengan_hasil_openssl_rand_hex_32   # minimal 32 karakter, server menolak secret pendek
+JWT_SECRET=replace_with_output_of_openssl_rand_hex_32   # at least 32 characters; the server rejects short secrets
 JWT_EXPIRED_HOURS=24
 
-# SMTP (untuk kirim email password customer & notifikasi)
+# SMTP (customer password emails & notifications)
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
-SMTP_FROM=noreply@gamelounge.com       # alamat pengirim (wajib)
-SMTP_PASSWORD=your-smtp-app-password   # Gmail: gunakan App Password, bukan password biasa
-SMTP_SENDER_NAME=Quantum Gaming Center # opsional — display name; fallback ke bagian sebelum @
+SMTP_FROM=noreply@gamelounge.com       # sender address (required)
+SMTP_PASSWORD=your-smtp-app-password   # Gmail: use an App Password, not the normal password
+SMTP_SENDER_NAME=Quantum Gaming Center # optional display name; falls back to the part before @
 ```
 
-> **Gmail App Password**: aktifkan 2-Step Verification di akun Google, lalu buat App Password di
+> **Gmail App Password**: enable 2-Step Verification on the Google account, then create an App Password at
 > [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords).
-> Jangan gunakan password Gmail biasa — akan ditolak SMTP.
+> Do not use the normal Gmail password. SMTP will reject it.
 
-### 4. Buat database MySQL
+### 4. Create the MySQL database
 
 ```sql
 CREATE DATABASE game_lounge_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 ```
 
-Buat tabel (dari root project). Server **tidak** menjalankan migrasi otomatis:
+Create the tables (from the project root). The server does **not** run migrations automatically:
 
 ```bash
-go run ./cmd/migrate                      # buat/perbarui tabel dari models
-SEED_PASSWORD=... go run ./cmd/seed       # opsional: data contoh dev (5-10 baris per tabel)
+go run ./cmd/migrate                      # create/update tables from models
+SEED_PASSWORD=... go run ./cmd/seed       # optional: sample dev data (5-10 rows per table)
 ```
 
-Super admin pertama: set `SEED_ADMIN_USERNAME`, `SEED_ADMIN_EMAIL`, `SEED_ADMIN_PASSWORD` saat menjalankan `cmd/migrate`.
-DDL lengkap ada di `database/schema.sql`.
+First super admin: set `SEED_ADMIN_USERNAME`, `SEED_ADMIN_EMAIL`, `SEED_ADMIN_PASSWORD` when running `cmd/migrate`.
+The full DDL is in `database/schema.sql`.
 
-> `cmd/migrate` hanya untuk dev. Jangan jalankan ke production — AutoMigrate bisa melakukan `ALTER` yang tidak diperlukan. Perubahan schema production dilakukan dengan SQL eksplisit.
+> `cmd/migrate` is for dev only. Do not run it against production: AutoMigrate can run `ALTER` statements you do not need. Production schema changes are done with explicit SQL.
 
-### 5. Jalankan server
+### 5. Run the server
 
 ```bash
 cd cmd
 go run main.go
 ```
 
-Server berjalan di: `http://localhost:8080`
+The server runs at: `http://localhost:8080`
 
 ---
 
-## Struktur Folder
+## Folder Structure
 
 ```
 game_lounge_be/
 │
-├── .env                          # Konfigurasi environment (tidak di-commit)
-├── .env.example                  # Template konfigurasi environment
+├── .env                          # Environment config (not committed)
+├── .env.example                  # Environment config template
 │
 ├── cmd/
-│   └── main.go                   # Entry point — inisialisasi DB, router, server
+│   └── main.go                   # Entry point: init DB, router, server
 │
 ├── config/
 │   ├── config.go                 # LoadEnv, GetEnv helper
-│   └── database.go               # Koneksi GORM ke MySQL (config.DB)
+│   └── database.go               # GORM connection to MySQL (config.DB)
 │
 ├── middleware/
-│   ├── auth.go                   # JWT auth middleware — set staff_id, staff_username, role_id, staff_role_id, is_system, permissions ke context
+│   ├── auth.go                   # JWT auth middleware: sets staff_id, staff_username, role_id, staff_role_id, is_system, permissions in the context
 │   └── cors.go                   # CORS middleware (allow all origins)
 │
-├── models/                       # Definisi struct GORM (mapping ke tabel DB)
+├── models/                       # GORM struct definitions (mapped to DB tables)
 │   ├── role.go
 │   ├── role_permission.go
 │   ├── staff.go
@@ -127,92 +127,92 @@ game_lounge_be/
 │   ├── store_operating_hour.go
 │   ├── store_holiday_schedule.go
 │   ├── store_room.go
-│   ├── store_pricing.go          # Konfigurasi harga per store
-│   ├── store_happy_hour_schedule.go  # Jadwal happy hour
-│   ├── store_happy_hour_price.go     # Harga happy hour per room type
-│   ├── store_package_price.go        # Harga paket durasi
-│   ├── store_flash_sale.go           # Flash sale (diskon sementara)
-│   ├── store_event_price.go          # Harga event per hari per store
-│   ├── play_credits_package.go   # Paket play credits
+│   ├── store_pricing.go          # Pricing config per store
+│   ├── store_happy_hour_schedule.go  # Happy hour schedule
+│   ├── store_happy_hour_price.go     # Happy hour price per room type
+│   ├── store_package_price.go        # Duration package price
+│   ├── store_flash_sale.go           # Flash sale (temporary price)
+│   ├── store_event_price.go          # Event price per day per store
+│   ├── play_credits_package.go   # Play credits package
 │   ├── play_credits_package_store.go  # Junction: package ↔ store
-│   ├── customer_play_credit.go   # Kepemilikan play credits per customer
+│   ├── customer_play_credit.go   # Play credits owned per customer
 │   ├── voucher.go                # Voucher / promo
 │   ├── voucher_store.go          # Junction: voucher ↔ store
 │   ├── voucher_room_template.go  # Junction: voucher ↔ room template (room type targeting)
-│   ├── voucher_usage.go          # Riwayat pemakaian voucher
+│   ├── voucher_usage.go          # Voucher usage history
 │   ├── customer.go               # Customer (member & walk-in)
-│   ├── customer_favorite_room_type.go  # Preferensi room type customer
-│   ├── booking.go                # Booking sesi bermain per ruangan
-│   ├── booking_sequence.go       # Counter global untuk kode booking (BK- / EV-)
-│   ├── event_booking.go          # Booking seluruh gedung untuk event (ulang tahun, corporate, dll)
-│   ├── global_holiday_schedule.go  # Hari libur nasional/global (menonaktifkan happy hour)
-│   ├── notification_template.go  # Template email & WhatsApp yang bisa dikustomisasi
-│   └── password_reset_token.go   # Token one-time-use untuk reset password super admin
+│   ├── customer_favorite_room_type.go  # Customer room type preferences
+│   ├── booking.go                # Play session booking per room
+│   ├── booking_sequence.go       # Global counter for booking codes (BK- / EV-)
+│   ├── event_booking.go          # Whole-venue booking for events (birthdays, corporate, etc.)
+│   ├── global_holiday_schedule.go  # National/global holidays (disable happy hour)
+│   ├── notification_template.go  # Customizable email & WhatsApp templates
+│   └── password_reset_token.go   # One-time token for super admin password reset
 │
-├── modules/                      # Fitur-fitur API, masing-masing modul mandiri
+├── modules/                      # API features; each module is self-contained
 │   │
 │   ├── auth/
 │   │   ├── controller/           # Login, Me, Logout
 │   │   ├── dto/                  # LoginRequest, LoginResponse
 │   │   ├── repository/           # FindStaffByUsername
-│   │   └── service/              # Validasi password, generate JWT
+│   │   └── service/              # Password check, generate JWT
 │   │
 │   ├── role/
-│   │   ├── controller/           # CRUD role
+│   │   ├── controller/           # Role CRUD
 │   │   ├── dto/                  # CreateRoleRequest, UpdateRoleRequest
 │   │   ├── repository/           # FindAllRoles (+ Preload Permissions), SyncPermissions
 │   │   └── service/              # RoleWithPermissions
 │   │
 │   ├── staff/
-│   │   ├── controller/           # CRUD staff + reset-password (Super Admin only)
+│   │   ├── controller/           # Staff CRUD + reset-password (Super Admin only)
 │   │   ├── dto/                  # CreateStaffRequest, UpdateStaffRequest, StaffFilter
 │   │   ├── repository/           # FindAllStaffs (Preload Role, StaffStores.Store), UpdatePassword
 │   │   └── service/              # Hash password, sync store assignments, ResetStaffPassword
 │   │
 │   ├── facility/
-│   │   ├── controller/           # CRUD kategori + CRUD fasilitas
+│   │   ├── controller/           # Category CRUD + facility CRUD
 │   │   ├── dto/                  # CreateCategoryRequest, CreateFacilityRequest
 │   │   ├── repository/           # FindAllFacilities (Preload Category)
 │   │   └── service/              # GetAllCategories, GetAllFacilities
 │   │
 │   ├── room_template/
-│   │   ├── controller/           # CRUD room template
+│   │   ├── controller/           # Room template CRUD
 │   │   ├── dto/                  # CreateRoomTemplateRequest (facility_ids, image_url)
 │   │   ├── repository/           # Preload Facilities.Category, SyncFacilities
 │   │   └── service/              # CreateRoomTemplate, UpdateRoomTemplate
 │   │
 │   ├── store/
-│   │   ├── controller/           # CRUD store + GetOperatingHours
+│   │   ├── controller/           # Store CRUD + GetOperatingHours
 │   │   ├── dto/                  # CreateStoreRequest (operating_hours, holidays, rooms)
 │   │   ├── repository/           # FindAllStores, FindStoreByID (full preload chain)
 │   │   └── service/              # StoreListItem, UpsertOperatingHours/Holidays, GetEffectiveOperatingHours
 │   │
 │   ├── pricing/
-│   │   ├── controller/           # CRUD config, happy hour, packages, flash sales, calculator
+│   │   ├── controller/           # Config CRUD, happy hour, packages, flash sales, calculator
 │   │   ├── dto/                  # PricingConfigRequest, CalculateRequest/Response
 │   │   ├── repository/           # GetByStore, UpsertHappyHourPrices, UpsertPackagePrices, IsStoreHoliday
-│   │   └── service/              # Calculate() — engine harga (flash sale overlap → HH/paket), isWeekdayForPricing
+│   │   └── service/              # Calculate(): pricing engine (flash sale overlap → HH/package), isWeekdayForPricing
 │   │
 │   ├── play_credits/
-│   │   ├── controller/           # CRUD paket + assign/adjust/delete member credits
+│   │   ├── controller/           # Package CRUD + assign/adjust/delete member credits
 │   │   ├── dto/                  # CreatePackageRequest, AssignCreditRequest, MemberCreditFilter
-│   │   ├── repository/           # SyncPackageStores, DeductHours (negatif = refund)
-│   │   └── service/              # MemberCreditResponse + computed fields (used_hours, days_left, dll)
+│   │   ├── repository/           # SyncPackageStores, DeductHours (negative = refund)
+│   │   └── service/              # MemberCreditResponse + computed fields (used_hours, days_left, etc.)
 │   │
 │   ├── voucher/
-│   │   ├── controller/           # CRUD voucher + generate-code + validate + customer-available + recipient-count
+│   │   ├── controller/           # Voucher CRUD + generate-code + validate + customer-available + recipient-count
 │   │   ├── dto/                  # CreateVoucherRequest (is_all_room_types, room_template_ids), ValidateVoucherRequest/Response
 │   │   ├── repository/           # FindAvailableVouchersForCustomer, RedeemVoucher, SyncRoomTemplates, GetMembersForVoucher
 │   │   └── service/              # VoucherWithStatus, sendVoucherNotification (targeted by room type, async)
 │   │
 │   ├── customer/
-│   │   ├── controller/           # CRUD customer + update-notes + resend-password
+│   │   ├── controller/           # Customer CRUD + update-notes + resend-password
 │   │   ├── dto/                  # CreateCustomerRequest, UpdateCustomerRequest, CustomerListFilter
 │   │   ├── repository/           # SyncFavoriteRoomTypes, FindCustomerByEmail/Whatsapp
-│   │   └── service/              # Generate & hash password, kirim email (async)
+│   │   └── service/              # Generate & hash password, send email (async)
 │   │
 │   ├── booking/
-│   │   ├── controller/           # CRUD booking + dashboard + sessions-ending-soon + cancel/complete
+│   │   ├── controller/           # Booking CRUD + dashboard + sessions-ending-soon + cancel/complete
 │   │   ├── dto/                  # CreateBookingRequest, BookingFilter, BookingResponse
 │   │   ├── repository/           # CheckOverlap, GenerateBookingCode, FindAvailableCredits, GetRoomNameByID
 │   │   └── service/              # 13-step CreateBooking; DashboardData includes open/close time + holiday info
@@ -224,7 +224,7 @@ game_lounge_be/
 │   │   └── service/              # GetPeriodDates, changePercent, GetSalesSummary/Trend/Transactions
 │   │
 │   ├── global_holiday/
-│   │   ├── controller/           # CRUD global holiday
+│   │   ├── controller/           # Global holiday CRUD
 │   │   ├── dto/                  # CreateGlobalHolidayRequest, UpdateGlobalHolidayRequest
 │   │   ├── repository/           # FindAll, FindByID, FindByDate, Create, Update, SoftDelete
 │   │   └── service/              # GetAll, Create, Update, Delete
@@ -233,24 +233,24 @@ game_lounge_be/
 │   │   ├── controller/           # GET list, GET by key, PUT update, POST preview
 │   │   ├── dto/                  # UpdateTemplateRequest, PreviewRequest
 │   │   ├── repository/           # FindAll, FindByKey, UpdateByKey
-│   │   └── service/              # GetRendered (dipakai customer/voucher/booking/play_credits service)
+│   │   └── service/              # GetRendered (used by the customer/voucher/booking/play_credits services)
 │   │
 │   ├── event_booking/
-│   │   ├── controller/           # CRUD event booking + dashboard + preview-price + cancel
+│   │   ├── controller/           # Event booking CRUD + dashboard + preview-price + cancel
 │   │   ├── dto/                  # CreateEventBookingRequest, EventBookingFilter, CancelEventBookingRequest
 │   │   ├── repository/           # CRUD + CheckOverlapWithRegular/Event + BatchUpdateStatus + UpsertEventPrice
 │   │   └── service/              # calculateTotalPrice (price/day÷24×hours), computeStatus, PreviewPrice
 │   │
 │   ├── admin_recovery/
-│   │   ├── controller/           # Request, Validate, Reset — selalu response sama (security)
+│   │   ├── controller/           # Request, Validate, Reset: always the same response (security)
 │   │   ├── repository/           # GenerateToken, FindSuperAdminByEmail, CountRequestsFromIP, MarkTokenUsed
-│   │   └── service/              # RequestReset (rate limit 3/jam/IP, async email), ValidateToken, ResetPassword
+│   │   └── service/              # RequestReset (rate limit 3/hour/IP, async email), ValidateToken, ResetPassword
 │   │
 │   └── upload/
-│       └── controller/           # POST /upload — simpan file ke ./assets/img/{folder}/
+│       └── controller/           # POST /upload: saves the file to ./assets/img/{folder}/
 │
 ├── routes/
-│   └── router.go                 # Daftar semua endpoint, grup public vs protected
+│   └── router.go                 # All endpoints, public vs protected groups
 │
 ├── utils/
 │   ├── jwt.go                    # GenerateJWT, ValidateJWT, JWTClaims struct
@@ -258,12 +258,12 @@ game_lounge_be/
 │   ├── response.go               # ResponseSuccess, ResponseError, ResponseSuccessPaginate, Meta
 │   ├── upload.go                 # SaveFileToAssets, InitAssetsDir, DeleteFile
 │   ├── email.go                  # dispatch, SendEmail (plain text→HTML), SendHTMLEmail, SendCustomerPasswordEmail
-│   ├── email_templates.go        # BuildBookingEmailHTML, BuildVoucherEmailHTML (fallback HTML berdesain)
+│   ├── email_templates.go        # BuildBookingEmailHTML, BuildVoucherEmailHTML (designed HTML fallback)
 │   ├── template_renderer.go      # RenderTemplate ({{var}} substitution), GetTemplateOrFallback
-│   └── password_generator.go     # GeneratePasswordFromName (substitusi karakter + suffix #Gl)
+│   └── password_generator.go     # GeneratePasswordFromName (character substitution + #Gl suffix)
 │
 ├── assets/
-│   └── img/                      # File gambar yang diupload (served sebagai static files)
+│   └── img/                      # Uploaded images (served as static files)
 │       ├── stores/
 │       ├── facilities/
 │       ├── room_templates/
@@ -281,29 +281,29 @@ game_lounge_be/
 
 ## API Endpoints
 
-| Base URL | Dipakai oleh | Auth |
-|----------|--------------|------|
+| Base URL | Used by | Auth |
+|----------|---------|------|
 | `/api/admin` | Admin FE (staff) | Cookie `staff_token` (Path=`/api/admin`) |
 | `/api/customer` | Customer web | Cookie `customer_token` (Path=`/api/customer`) |
-| `/api/public` | Customer web | Tanpa auth |
+| `/api/public` | Customer web | None |
 | `/webhook/xendit` | Xendit | Header `x-callback-token` |
 
-Tabel staff di bawah ditulis relatif terhadap `/api/admin` (contoh: `/stores` = `/api/admin/stores`).
+The staff tables below are relative to `/api/admin` (example: `/stores` = `/api/admin/stores`).
 
-### 🔓 Staff — tanpa auth
+### 🔓 Staff — no auth
 
-| Method | Endpoint | Keterangan |
-|--------|----------|------------|
-| POST | `/auth/login` | Login, server set cookie `staff_token` |
-| POST | `/admin-recovery/request` | Kirim link reset password ke email super admin |
-| GET | `/admin-recovery/:token/validate` | Validasi token sebelum form reset ditampilkan |
-| POST | `/admin-recovery/:token/reset` | Reset password super admin dengan token yang valid |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/auth/login` | Login; the server sets the `staff_token` cookie |
+| POST | `/admin-recovery/request` | Send a password reset link to the super admin email |
+| GET | `/admin-recovery/:token/validate` | Validate the token before the reset form is shown |
+| POST | `/admin-recovery/:token/reset` | Reset the super admin password with a valid token |
 
-> **Admin Recovery** — response `/request` selalu sama (200 OK) agar penyerang tidak tahu apakah email terdaftar. Rate limit: maks 3 request/jam per IP. Token berlaku 15 menit dan hanya bisa dipakai 1 kali.
+> **Admin Recovery**: the `/request` response is always the same (200 OK), so an attacker cannot tell whether an email is registered. Rate limit: max 3 requests/hour per IP. The token is valid for 15 minutes and can be used only once.
 
-**Upload** (`POST /upload`, butuh staff login) — `multipart/form-data`:
-- `file` *(required)* — file gambar (jpg, png, webp, svg, maks 2MB)
-- `folder` *(optional)* — subfolder tujuan, misal `stores`, `facilities` (default: `img`)
+**Upload** (`POST /upload`, requires staff login), `multipart/form-data`:
+- `file` *(required)*: image file (jpg, png, webp, svg, max 2MB)
+- `folder` *(optional)*: target subfolder, e.g. `stores`, `facilities` (default: `img`)
 
 Response:
 ```json
@@ -315,69 +315,69 @@ Response:
 ### 🔒 Staff — protected (cookie `staff_token`)
 
 #### Auth
-| Method | Endpoint | Keterangan |
-|--------|----------|------------|
-| GET | `/auth/me` | Data staff yang sedang login |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/auth/me` | Logged-in staff data |
 | POST | `/auth/logout` | Logout |
 
 #### Roles
-| Method | Endpoint | Keterangan |
-|--------|----------|------------|
-| GET | `/roles` | List semua role (+ permissions) |
-| POST | `/roles` | Buat role baru |
-| GET | `/roles/:id` | Detail role |
-| PUT | `/roles/:id` | Update role |
-| DELETE | `/roles/:id` | Hapus role (soft delete) |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/roles` | List all roles (+ permissions) |
+| POST | `/roles` | Create a role |
+| GET | `/roles/:id` | Role detail |
+| PUT | `/roles/:id` | Update a role |
+| DELETE | `/roles/:id` | Delete a role (soft delete) |
 
 #### Staffs
-| Method | Endpoint | Keterangan |
-|--------|----------|------------|
+| Method | Endpoint | Description |
+|--------|----------|-------------|
 | GET | `/staffs` | List staff (filter: search, role_id, store_id) |
-| POST | `/staffs` | Buat staff baru |
-| GET | `/staffs/:id` | Detail staff |
+| POST | `/staffs` | Create staff |
+| GET | `/staffs/:id` | Staff detail |
 | PUT | `/staffs/:id` | Update staff |
-| DELETE | `/staffs/:id` | Hapus staff (soft delete) |
-| POST | `/staffs/:id/reset-password` | Reset password staff & kirim email (Super Admin only) |
+| DELETE | `/staffs/:id` | Delete staff (soft delete) |
+| POST | `/staffs/:id/reset-password` | Reset a staff password and send an email (Super Admin only) |
 
 #### Facility Categories
-| Method | Endpoint | Keterangan |
-|--------|----------|------------|
-| GET | `/facility-categories` | List semua kategori |
-| POST | `/facility-categories` | Buat kategori |
-| PUT | `/facility-categories/:id` | Update kategori |
-| DELETE | `/facility-categories/:id` | Hapus kategori |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/facility-categories` | List all categories |
+| POST | `/facility-categories` | Create a category |
+| PUT | `/facility-categories/:id` | Update a category |
+| DELETE | `/facility-categories/:id` | Delete a category |
 
 #### Facilities
-| Method | Endpoint | Keterangan |
-|--------|----------|------------|
-| GET | `/facilities` | List fasilitas (filter: search, category_id) |
-| POST | `/facilities` | Buat fasilitas |
-| GET | `/facilities/:id` | Detail fasilitas |
-| PUT | `/facilities/:id` | Update fasilitas |
-| DELETE | `/facilities/:id` | Hapus fasilitas |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/facilities` | List facilities (filter: search, category_id) |
+| POST | `/facilities` | Create a facility |
+| GET | `/facilities/:id` | Facility detail |
+| PUT | `/facilities/:id` | Update a facility |
+| DELETE | `/facilities/:id` | Delete a facility |
 
 #### Room Templates
-| Method | Endpoint | Keterangan |
-|--------|----------|------------|
-| GET | `/room-templates` | List room template (+ facilities & category) |
-| POST | `/room-templates` | Buat room template |
-| GET | `/room-templates/:id` | Detail room template |
-| PUT | `/room-templates/:id` | Update room template |
-| DELETE | `/room-templates/:id` | Hapus room template |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/room-templates` | List room templates (+ facilities & category) |
+| POST | `/room-templates` | Create a room template |
+| GET | `/room-templates/:id` | Room template detail |
+| PUT | `/room-templates/:id` | Update a room template |
+| DELETE | `/room-templates/:id` | Delete a room template |
 
 #### Stores
-| Method | Endpoint | Keterangan |
-|--------|----------|------------|
-| GET | `/stores` | List store (+ operating hours, holidays, room count) |
-| POST | `/stores` | Buat store baru |
-| GET | `/stores/operating-hours` | Jam operasional efektif store pada tanggal tertentu |
-| GET | `/stores/:id` | Detail store (+ rooms → template → facilities → category) |
-| PUT | `/stores/:id` | Update store |
-| DELETE | `/stores/:id` | Hapus store (soft delete) |
-| GET | `/stores/:id/event-price` | Ambil harga event per hari untuk store ini |
-| PUT | `/stores/:id/event-price` | Set/update harga event per hari untuk store ini |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/stores` | List stores (+ operating hours, holidays, room count) |
+| POST | `/stores` | Create a store |
+| GET | `/stores/operating-hours` | Effective store operating hours on a given date |
+| GET | `/stores/:id` | Store detail (+ rooms → template → facilities → category) |
+| PUT | `/stores/:id` | Update a store |
+| DELETE | `/stores/:id` | Delete a store (soft delete) |
+| GET | `/stores/:id/event-price` | Get the event price per day for this store |
+| PUT | `/stores/:id/event-price` | Set/update the event price per day for this store |
 
-**`GET /stores/operating-hours`** — query params: `store_id` *(required)*, `date` *(required, YYYY-MM-DD)*
+**`GET /stores/operating-hours`**: query params `store_id` *(required)*, `date` *(required, YYYY-MM-DD)*
 
 Response:
 ```json
@@ -385,403 +385,403 @@ Response:
   "open_time": "10:00:00",
   "close_time": "22:00:00",
   "is_holiday": true,
-  "holiday_name": "Hari Kemerdekaan Indonesia",
+  "holiday_name": "Indonesian Independence Day",
   "holiday_type": "global"
 }
 ```
 Priority: **Global Holiday** → **Store Holiday** → **Regular Hours** (weekday/weekend)
 
 #### Pricing
-| Method | Endpoint | Keterangan |
-|--------|----------|------------|
-| GET | `/pricing` | List semua pricing config |
-| POST | `/pricing` | Buat pricing config baru |
-| GET | `/pricing/:store_id` | Pricing config untuk store tertentu |
-| PUT | `/pricing/:store_id` | Update pricing config |
-| DELETE | `/pricing/:store_id` | Hapus pricing config |
-| POST | `/pricing/calculate` | Hitung estimasi harga booking |
-| POST | `/pricing/:store_id/happy-hour/schedules` | Tambah jadwal happy hour |
-| DELETE | `/pricing/:store_id/happy-hour/schedules/:id` | Hapus jadwal happy hour |
-| GET | `/pricing/:store_id/happy-hour/prices` | List harga happy hour per room type |
-| PUT | `/pricing/:store_id/happy-hour/prices` | Upsert harga happy hour |
-| GET | `/pricing/:store_id/packages` | List harga paket durasi |
-| PUT | `/pricing/:store_id/packages` | Upsert harga paket durasi |
-| DELETE | `/pricing/:store_id/packages/:id` | Hapus harga paket |
-| GET | `/pricing/:store_id/flash-sales` | List flash sale |
-| POST | `/pricing/:store_id/flash-sales` | Buat flash sale |
-| PUT | `/pricing/flash-sales/:id` | Update flash sale |
-| DELETE | `/pricing/flash-sales/:id` | Hapus flash sale |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/pricing` | List all pricing configs |
+| POST | `/pricing` | Create a pricing config |
+| GET | `/pricing/:store_id` | Pricing config for a store |
+| PUT | `/pricing/:store_id` | Update a pricing config |
+| DELETE | `/pricing/:store_id` | Delete a pricing config |
+| POST | `/pricing/calculate` | Calculate an estimated booking price |
+| POST | `/pricing/:store_id/happy-hour/schedules` | Add a happy hour schedule |
+| DELETE | `/pricing/:store_id/happy-hour/schedules/:id` | Delete a happy hour schedule |
+| GET | `/pricing/:store_id/happy-hour/prices` | List happy hour prices per room type |
+| PUT | `/pricing/:store_id/happy-hour/prices` | Upsert happy hour prices |
+| GET | `/pricing/:store_id/packages` | List duration package prices |
+| PUT | `/pricing/:store_id/packages` | Upsert duration package prices |
+| DELETE | `/pricing/:store_id/packages/:id` | Delete a package price |
+| GET | `/pricing/:store_id/flash-sales` | List flash sales |
+| POST | `/pricing/:store_id/flash-sales` | Create a flash sale |
+| PUT | `/pricing/flash-sales/:id` | Update a flash sale |
+| DELETE | `/pricing/flash-sales/:id` | Delete a flash sale |
 
-**Calculate** — query params: `store_id`, `room_template_id`, `date`, `start_time`, `duration_hours`
+**Calculate**: query params `store_id`, `room_template_id`, `date`, `start_time`, `duration_hours`
 
 #### Play Credits — Packages
-| Method | Endpoint | Keterangan |
-|--------|----------|------------|
-| GET | `/play-credits/packages` | List semua paket |
-| GET | `/play-credits/packages/active` | List paket aktif saja |
-| POST | `/play-credits/packages` | Buat paket baru (`multipart/form-data`) |
-| GET | `/play-credits/packages/:id` | Detail paket |
-| PUT | `/play-credits/packages/:id` | Update paket (`multipart/form-data`) |
-| DELETE | `/play-credits/packages/:id` | Hapus paket (soft delete) |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/play-credits/packages` | List all packages |
+| GET | `/play-credits/packages/active` | List active packages only |
+| POST | `/play-credits/packages` | Create a package (`multipart/form-data`) |
+| GET | `/play-credits/packages/:id` | Package detail |
+| PUT | `/play-credits/packages/:id` | Update a package (`multipart/form-data`) |
+| DELETE | `/play-credits/packages/:id` | Delete a package (soft delete) |
 
 #### Play Credits — Member Credits
-| Method | Endpoint | Keterangan |
-|--------|----------|------------|
-| GET | `/play-credits/members` | List kepemilikan credits (filter: customer_id, search, is_active) |
-| POST | `/play-credits/members` | Assign credits ke customer |
-| GET | `/play-credits/members/:id` | Detail member credit |
-| PATCH | `/play-credits/members/:id/adjust` | Adjust jam credits (tambah / kurangi) |
-| DELETE | `/play-credits/members/:id` | Hapus member credit (soft delete) |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/play-credits/members` | List credits ownership (filter: customer_id, search, is_active) |
+| POST | `/play-credits/members` | Assign credits to a customer |
+| GET | `/play-credits/members/:id` | Member credit detail |
+| PATCH | `/play-credits/members/:id/adjust` | Adjust credit hours (add / subtract) |
+| DELETE | `/play-credits/members/:id` | Delete a member credit (soft delete) |
 
 #### Vouchers
-| Method | Endpoint | Keterangan |
-|--------|----------|------------|
-| GET | `/vouchers` | List voucher (filter: search, type, status) |
-| GET | `/vouchers/generate-code` | Generate kode voucher unik |
-| GET | `/vouchers/customer-available` | Voucher tersedia untuk customer tertentu |
-| GET | `/vouchers/recipient-count` | Preview jumlah member penerima berdasarkan room type |
-| POST | `/vouchers/validate` | Validasi & cek kelayakan voucher |
-| POST | `/vouchers` | Buat voucher baru |
-| GET | `/vouchers/:id` | Detail voucher |
-| PUT | `/vouchers/:id` | Update voucher |
-| DELETE | `/vouchers/:id` | Hapus voucher (soft delete) |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/vouchers` | List vouchers (filter: search, type, status) |
+| GET | `/vouchers/generate-code` | Generate a unique voucher code |
+| GET | `/vouchers/customer-available` | Vouchers available to a given customer |
+| GET | `/vouchers/recipient-count` | Preview the number of member recipients by room type |
+| POST | `/vouchers/validate` | Validate a voucher and check eligibility |
+| POST | `/vouchers` | Create a voucher |
+| GET | `/vouchers/:id` | Voucher detail |
+| PUT | `/vouchers/:id` | Update a voucher |
+| DELETE | `/vouchers/:id` | Delete a voucher (soft delete) |
 
-**customer-available** — query params: `customer_id` *(required)*, `store_id` *(required)*, `type` (default: `booking`)
+**customer-available**: query params `customer_id` *(required)*, `store_id` *(required)*, `type` (default: `booking`)
 
-**recipient-count** — query params: `is_all_room_types` (`true`/`false`, default `true`), `room_template_ids[]` *(repeated uint)*
+**recipient-count**: query params `is_all_room_types` (`true`/`false`, default `true`), `room_template_ids[]` *(repeated uint)*
 
-**Room type targeting pada voucher:**
-| Field | Tipe | Keterangan |
-|-------|------|------------|
-| `is_all_room_types` | bool | `true` = berlaku semua room type; `false` = per room type |
-| `room_template_ids` | `[]uint` | Daftar room template ID (wajib jika `is_all_room_types=false`) |
+**Room type targeting on vouchers:**
+| Field | Type | Description |
+|-------|------|-------------|
+| `is_all_room_types` | bool | `true` = valid for all room types; `false` = per room type |
+| `room_template_ids` | `[]uint` | Room template IDs (required when `is_all_room_types=false`) |
 
-> Jika `is_all_room_types = false`, hanya member yang memiliki salah satu room type tersebut sebagai **favorit** yang akan menerima notifikasi. Validasi voucher saat booking juga akan cek room type yang dipilih.
+> When `is_all_room_types = false`, only members who have one of those room types as a **favorite** receive the notification. Voucher validation at booking time also checks the selected room type.
 
 #### Customers
-| Method | Endpoint | Keterangan |
-|--------|----------|------------|
-| GET | `/customers` | List customer (filter: search, type, store_id) |
-| POST | `/customers` | Buat customer baru |
-| GET | `/customers/:id` | Detail customer |
-| PUT | `/customers/:id` | Update customer |
-| PATCH | `/customers/:id/notes` | Update catatan internal customer |
-| DELETE | `/customers/:id` | Hapus customer (soft delete) |
-| POST | `/customers/:id/resend-password` | Kirim ulang email password |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/customers` | List customers (filter: search, type, store_id) |
+| POST | `/customers` | Create a customer |
+| GET | `/customers/:id` | Customer detail |
+| PUT | `/customers/:id` | Update a customer |
+| PATCH | `/customers/:id/notes` | Update internal customer notes |
+| DELETE | `/customers/:id` | Delete a customer (soft delete) |
+| POST | `/customers/:id/resend-password` | Resend the password email |
 
 #### Bookings
-| Method | Endpoint | Keterangan |
-|--------|----------|------------|
-| GET | `/bookings` | List booking (filter: store_id, date_from, date_to, status, search) |
-| GET | `/bookings/dashboard` | Data dashboard booking per store (rooms + bookings + jam operasional efektif + info holiday) |
-| GET | `/bookings/sessions-ending-soon` | Sesi yang akan berakhir dalam 5 menit ke depan |
-| GET | `/bookings/available-credits` | Play credits yang tersedia untuk customer tertentu |
-| POST | `/bookings` | Buat booking baru |
-| GET | `/bookings/:id` | Detail booking |
-| PATCH | `/bookings/:id/cancel` | Batalkan booking |
-| PATCH | `/bookings/:id/complete` | Tandai booking selesai |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/bookings` | List bookings (filter: store_id, date_from, date_to, status, search) |
+| GET | `/bookings/dashboard` | Booking dashboard data per store (rooms + bookings + effective operating hours + holiday info) |
+| GET | `/bookings/sessions-ending-soon` | Sessions ending in the next 5 minutes |
+| GET | `/bookings/available-credits` | Play credits available to a given customer |
+| POST | `/bookings` | Create a booking |
+| GET | `/bookings/:id` | Booking detail |
+| PATCH | `/bookings/:id/cancel` | Cancel a booking |
+| PATCH | `/bookings/:id/complete` | Mark a booking as completed |
 
-**available-credits** — query params: `customer_id` *(required)*, `store_id` *(required)*
+**available-credits**: query params `customer_id` *(required)*, `store_id` *(required)*
 
 #### Sales
-| Method | Endpoint | Keterangan |
-|--------|----------|------------|
-| GET | `/sales/summary` | Dashboard utama — revenue, transaksi, breakdown per tipe/cabang/room |
-| GET | `/sales/trend` | Data grafik tren penjualan |
-| GET | `/sales/transactions` | Daftar transaksi (booking + play credits) dengan pagination |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/sales/summary` | Main dashboard: revenue, transactions, breakdown per type/branch/room |
+| GET | `/sales/trend` | Sales trend chart data |
+| GET | `/sales/transactions` | Transaction list (bookings + play credits) with pagination |
 
 #### Global Holidays
-| Method | Endpoint | Keterangan |
-|--------|----------|------------|
-| GET | `/global-holidays` | List hari libur nasional (filter: year, search) |
-| POST | `/global-holidays` | Tambah hari libur nasional |
-| PUT | `/global-holidays/:id` | Update hari libur |
-| DELETE | `/global-holidays/:id` | Hapus hari libur (soft delete) |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/global-holidays` | List national holidays (filter: year, search) |
+| POST | `/global-holidays` | Add a national holiday |
+| PUT | `/global-holidays/:id` | Update a holiday |
+| DELETE | `/global-holidays/:id` | Delete a holiday (soft delete) |
 
-> Global holiday **menonaktifkan happy hour** di semua store pada tanggal tersebut — diprioritaskan sebelum store holiday dan pengecekan hari kerja.
+> A global holiday **disables happy hour** in all stores on that date. It takes priority over store holidays and the weekday check.
 
 **Body `POST /global-holidays`:**
 ```json
 {
   "date": "2025-08-17",
-  "name": "Hari Kemerdekaan Indonesia",
+  "name": "Indonesian Independence Day",
   "open_time": "10:00",
   "close_time": "22:00"
 }
 ```
 
 #### Event Bookings
-| Method | Endpoint | Keterangan |
-|--------|----------|------------|
-| GET | `/event-bookings` | List event booking (filter: store_id, status, date_from, date_to) |
-| POST | `/event-bookings` | Buat event booking baru |
-| GET | `/event-bookings/dashboard` | Event booking aktif untuk grid kalender (query: `store_id`, `date`) |
-| GET | `/event-bookings/preview-price` | Preview estimasi harga untuk admin (query: `store_id`, `start_time`, `end_time`). Customer web memakai `/api/public/event-booking/quote` |
-| GET | `/event-bookings/:id` | Detail event booking |
-| PATCH | `/event-bookings/:id/cancel` | Batalkan event booking |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/event-bookings` | List event bookings (filter: store_id, status, date_from, date_to) |
+| POST | `/event-bookings` | Create an event booking |
+| GET | `/event-bookings/dashboard` | Active event bookings for the calendar grid (query: `store_id`, `date`) |
+| GET | `/event-bookings/preview-price` | Estimated price preview for admin (query: `store_id`, `start_time`, `end_time`). The customer web uses `/api/public/event-booking/quote` |
+| GET | `/event-bookings/:id` | Event booking detail |
+| PATCH | `/event-bookings/:id/cancel` | Cancel an event booking |
 
 **Body `POST /event-bookings`:**
 ```json
 {
   "store_id": "uuid-store",
-  "event_name": "Ulang Tahun Andi",
+  "event_name": "Andi's Birthday",
   "customer_name": "Budi Santoso",
   "customer_whatsapp": "08123456789",
   "customer_email": "budi@example.com",
   "booking_date": "2025-12-25",
   "start_time": "10:00",
   "end_time": "22:00",
-  "notes": "Tolong siapkan dekorasi"
+  "notes": "Please prepare decorations"
 }
 ```
 
-> - `duration_hours` **dihitung otomatis** dari selisih `start_time` dan `end_time`, tidak perlu diisi.
-> - `total_price` dihitung: `round((price_per_day ÷ 24 × duration_hours) / 1000) × 1000` (dibulatkan ke Rp 1.000 terdekat).
-> - Harga event per store dikonfigurasi via `PUT /stores/:id/event-price`.
-> - Event booking **memblokir seluruh store** — regular booking yang waktunya overlap akan ditolak secara otomatis.
-> - Overlap dihitung dengan waktu absolut per hari operasional: jam sebelum jam buka store dianggap setelah tengah malam. Contoh (store 10:00–02:00): booking 00:00–01:00 pada `booking_date` yang sama bentrok dengan event 20:00–02:00.
-> - Jika ada regular booking yang sudah terlanjur ada di jam tersebut, create event booking akan gagal dengan pesan error.
+> - `duration_hours` is **calculated automatically** from `start_time` and `end_time`. Do not send it.
+> - `total_price` = `round((price_per_day ÷ 24 × duration_hours) / 1000) × 1000` (rounded to the nearest Rp 1,000).
+> - The event price per store is configured with `PUT /stores/:id/event-price`.
+> - An event booking **blocks the whole store**. Regular bookings that overlap are rejected automatically.
+> - Overlap uses absolute time per operating day: a time before the store opening hour counts as after midnight. Example (store 10:00–02:00): a booking 00:00–01:00 on the same `booking_date` conflicts with an event 20:00–02:00.
+> - If a regular booking already exists in that time range, creating the event booking fails with an error message.
 
 #### Notification Templates
-| Method | Endpoint | Keterangan |
-|--------|----------|------------|
-| GET | `/notification-templates` | List semua template notifikasi |
-| GET | `/notification-templates/:key` | Detail template berdasarkan key |
-| PUT | `/notification-templates/:key` | Update isi template (email & WhatsApp) |
-| POST | `/notification-templates/preview` | Preview template dengan data contoh |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/notification-templates` | List all notification templates |
+| GET | `/notification-templates/:key` | Template detail by key |
+| PUT | `/notification-templates/:key` | Update template content (email & WhatsApp) |
+| POST | `/notification-templates/preview` | Preview a template with sample data |
 
-**notification_key** yang tersedia secara default:
+Default **notification_key** values:
 
-| Key | Deskripsi | Variabel |
-|-----|-----------|---------|
-| `customer_welcome` | Email sambutan + password akun baru | `nama_customer`, `email`, `password` |
-| `voucher_notification` | Notifikasi voucher ke seluruh member | `nama_customer`, `nama_voucher`, `kode_voucher`, `berlaku_sampai`, `deskripsi_voucher` |
-| `booking_confirmation` | Konfirmasi booking ke customer | `nama_customer`, `kode_booking`, `nama_ruangan`, `tanggal`, `jam_mulai`, `jam_selesai`, `durasi`, `total_harga` |
-| `play_credits_assigned` | Notifikasi assign play credits ke customer | `nama_customer`, `nama_paket`, `total_jam`, `sisa_jam`, `tanggal_kadaluwarsa` |
+| Key | Description | Variables |
+|-----|-------------|-----------|
+| `customer_welcome` | Welcome email + new account password | `nama_customer`, `email`, `password` |
+| `voucher_notification` | Voucher notification to all members | `nama_customer`, `nama_voucher`, `kode_voucher`, `berlaku_sampai`, `deskripsi_voucher` |
+| `booking_confirmation` | Booking confirmation to the customer | `nama_customer`, `kode_booking`, `nama_ruangan`, `tanggal`, `jam_mulai`, `jam_selesai`, `durasi`, `total_harga` |
+| `play_credits_assigned` | Play credits assigned to the customer | `nama_customer`, `nama_paket`, `total_jam`, `sisa_jam`, `tanggal_kadaluwarsa` |
 
-> Template disimpan di tabel `notification_templates`. Admin bisa mengubah konten email & WhatsApp tanpa deploy ulang. Variabel dinamis menggunakan format `{{nama_variabel}}`.
+> Templates are stored in the `notification_templates` table. Admins can change email & WhatsApp content without a redeploy. Dynamic variables use the `{{variable_name}}` format.
 
-**Filter params (semua sales endpoint):**
-| Param | Nilai | Default |
-|-------|-------|---------|
+**Filter params (all sales endpoints):**
+| Param | Values | Default |
+|-------|--------|---------|
 | `period` | `today` \| `yesterday` \| `this_week` \| `this_month` \| `custom` | `today` |
-| `store_id` | UUID store | — (semua store) |
-| `date_from` | `YYYY-MM-DD` | — (wajib jika `period=custom`) |
-| `date_to` | `YYYY-MM-DD` | — (wajib jika `period=custom`) |
-| `granularity` | `daily` \| `weekly` \| `monthly` | `daily` (khusus `/trend`) |
-| `type` | `all` \| `booking` \| `play_credits` | `all` (khusus `/transactions`) |
-| `page` | integer | `1` (khusus `/transactions`) |
-| `per_page` | integer | `20` (khusus `/transactions`) |
+| `store_id` | Store UUID | — (all stores) |
+| `date_from` | `YYYY-MM-DD` | — (required when `period=custom`) |
+| `date_to` | `YYYY-MM-DD` | — (required when `period=custom`) |
+| `granularity` | `daily` \| `weekly` \| `monthly` | `daily` (`/trend` only) |
+| `type` | `all` \| `booking` \| `play_credits` | `all` (`/transactions` only) |
+| `page` | integer | `1` (`/transactions` only) |
+| `per_page` | integer | `20` (`/transactions` only) |
 
 ---
 
-### 🌐 Public — customer web (`/api/public`, tanpa auth)
+### 🌐 Public — customer web (`/api/public`, no auth)
 
-| Method | Endpoint | Keterangan |
-|--------|----------|------------|
-| GET | `/banners` | Banner aktif, urut `sort_order` |
-| GET | `/banners/:id` | Detail banner aktif (banner nonaktif → 404) |
-| GET | `/stores` | List store |
-| GET | `/stores/:id` | Detail store |
-| GET | `/room-templates` | Room template aktif + `min_price` (query opsional: `store_id`) |
-| GET | `/room-templates/:id` | Detail room template + `facilities` aktif + `min_price` |
-| GET | `/booking/availability` | Slot tersedia (query: `store_id`, `room_template_id`, `date`, `duration_hours`) |
-| GET | `/booking/slots` | Slot per jam + sisa unit + harga |
-| GET | `/booking/quote` | Harga final slot terpilih tanpa membuat hold (query: `store_id`, `room_template_id`, `booking_date`, `selected_slots[]`) |
-| GET | `/play-credits/packages` | Paket play credits |
-| GET | `/event-booking/availability` | Jam yang sudah terisi + `event_price` (query: `store_id`, `date`, opsional `start_time`, `end_time`) |
-| GET | `/event-booking/quote` | Harga event customer (query: `store_id`, `booking_date`, `start_time`, `end_time`) |
-| GET | `/fnb/menu` | Menu FnB |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/banners` | Active banners, ordered by `sort_order` |
+| GET | `/banners/:id` | Active banner detail (inactive banner → 404) |
+| GET | `/stores` | List stores |
+| GET | `/stores/:id` | Store detail |
+| GET | `/room-templates` | Active room templates + `min_price` (optional query: `store_id`) |
+| GET | `/room-templates/:id` | Room template detail + active `facilities` + `min_price` |
+| GET | `/booking/availability` | Available slots (query: `store_id`, `room_template_id`, `date`, `duration_hours`) |
+| GET | `/booking/slots` | Hourly slots + remaining units + price |
+| GET | `/booking/quote` | Final price for the selected slots without creating a hold (query: `store_id`, `room_template_id`, `booking_date`, `selected_slots[]`) |
+| GET | `/play-credits/packages` | Play credits packages |
+| GET | `/event-booking/availability` | Taken time ranges + `event_price` (query: `store_id`, `date`, optional `start_time`, `end_time`) |
+| GET | `/event-booking/quote` | Customer event price (query: `store_id`, `booking_date`, `start_time`, `end_time`) |
+| GET | `/fnb/menu` | FnB menu |
 
-> - Response banner dan room template memakai whitelist field. Kolom audit (`created_by`, `updated_by`, `deleted_by`, `deleted_at`) dan `is_active` tidak dikirim, karena `created_by`/`updated_by` berisi username staff.
-> - `/event-booking/quote` → `{store_id, booking_date, start_time, end_time, duration_hours, price_per_day, total_price, available}`. `total_price` sama persis dengan harga yang ditagih saat `/customer/event-bookings/initiate` (dibulatkan ke Rp 1.000). `available` = tidak bentrok dengan booking reguler atau event lain saat ini.
+> - Banner and room template responses use a field whitelist. Audit columns (`created_by`, `updated_by`, `deleted_by`, `deleted_at`) and `is_active` are not sent, because `created_by`/`updated_by` contain staff usernames.
+> - `/event-booking/quote` → `{store_id, booking_date, start_time, end_time, duration_hours, price_per_day, total_price, available}`. `total_price` is exactly what `/customer/event-bookings/initiate` charges (rounded to Rp 1,000). `available` = no conflict with regular bookings or other events right now.
 
 ### 👤 Customer (`/api/customer`, cookie `customer_token`)
 
-**Tanpa auth:**
+**No auth:**
 
-| Method | Endpoint | Keterangan |
-|--------|----------|------------|
-| POST | `/login` | Login, server set cookie `customer_token` |
-| POST | `/forgot-password` | Kirim link reset password |
-| GET | `/reset-password/:token/validate` | Validasi token reset |
-| POST | `/reset-password/:token` | Reset password |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/login` | Login; the server sets the `customer_token` cookie |
+| POST | `/forgot-password` | Send a password reset link |
+| GET | `/reset-password/:token/validate` | Validate a reset token |
+| POST | `/reset-password/:token` | Reset the password |
 
-**Butuh login:**
+**Login required:**
 
-| Method | Endpoint | Keterangan |
-|--------|----------|------------|
-| GET | `/me` | Data customer yang login |
-| POST | `/logout` | Logout (semua token lama ditolak) |
-| PUT | `/profile` | Update profil |
-| PUT | `/change-password` | Ganti password. Password lama salah → **400** (bukan 401) |
-| GET | `/room-recommendations` | Rekomendasi room |
-| GET | `/credits/expiring` | Play credits yang akan kadaluwarsa |
-| GET | `/my-credits` | Play credits milik customer |
-| GET | `/vouchers/available` | Voucher yang bisa dipakai |
-| POST | `/bookings/initiate` | Buat hold + invoice Xendit |
-| GET | `/bookings` | List booking (query: `page`, `per_page` maks 50, `status`) |
-| GET | `/bookings/by-hold/:hold_id` | Status pembayaran hold untuk halaman payment success |
-| GET | `/bookings/:id` | Detail booking |
-| POST | `/play-credits/purchase/initiate` | Beli paket play credits (invoice Xendit) |
-| POST | `/event-bookings/initiate` | Buat event booking + invoice Xendit |
-| POST | `/fnb/orders` | Pesan FnB |
-| GET | `/fnb/orders` | Riwayat pesanan FnB |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/me` | Logged-in customer data |
+| POST | `/logout` | Logout (all older tokens are rejected) |
+| PUT | `/profile` | Update the profile |
+| PUT | `/change-password` | Change the password. Wrong old password → **400** (not 401) |
+| GET | `/room-recommendations` | Room recommendations |
+| GET | `/credits/expiring` | Play credits that will expire soon |
+| GET | `/my-credits` | The customer's play credits |
+| GET | `/vouchers/available` | Usable vouchers |
+| POST | `/bookings/initiate` | Create a hold + Xendit invoice |
+| GET | `/bookings` | List bookings (query: `page`, `per_page` max 50, `status`) |
+| GET | `/bookings/by-hold/:hold_id` | Payment status of a hold, for the payment success page |
+| GET | `/bookings/:id` | Booking detail |
+| POST | `/play-credits/purchase/initiate` | Buy a play credits package (Xendit invoice) |
+| POST | `/event-bookings/initiate` | Create an event booking + Xendit invoice |
+| POST | `/fnb/orders` | Order FnB |
+| GET | `/fnb/orders` | FnB order history |
 
-Endpoint `.../mock-confirm` (booking, play credits, event) hanya terdaftar saat `XENDIT_SECRET_KEY` kosong (mock mode dev).
+The `.../mock-confirm` endpoints (booking, play credits, event) are registered only when `XENDIT_SECRET_KEY` is empty (dev mock mode).
 
-**`GET /bookings`** — `status` opsional, dipisah koma: `upcoming`, `ongoing`, `completed`, `cancelled` (contoh `?status=upcoming,ongoing`). Nilai lain → 400. Status di DB bisa basi, karena sinkronisasi massal hanya jalan saat dashboard admin dibuka. Karena itu, sebelum query, status booking milik customer disinkronkan dulu dengan waktu WIB sekarang.
+**`GET /bookings`**: optional `status`, comma-separated: `upcoming`, `ongoing`, `completed`, `cancelled` (example `?status=upcoming,ongoing`). Any other value → 400. The status stored in the DB can be stale, because the bulk sync only runs when the admin dashboard is opened. So before the query, the customer's booking statuses are synced against the current WIB time.
 
-**`GET /bookings/by-hold/:hold_id`** — `data`: `{status, booking_code?, booking_id?}`:
+**`GET /bookings/by-hold/:hold_id`**: `data` is `{status, booking_code?, booking_id?}`:
 
-| `status` | Arti |
-|----------|------|
-| `pending` | Hold masih berlaku, webhook belum diproses |
-| `confirmed` | Booking sudah dibuat. `booking_code` dan `booking_id` terisi |
-| `expired` | Hold lewat `expires_at`. Belum final: webhook yang terlambat masih bisa mengonfirmasi jika slot kosong |
+| `status` | Meaning |
+|----------|---------|
+| `pending` | The hold is still valid; the webhook has not been processed yet |
+| `confirmed` | The booking exists. `booking_code` and `booking_id` are set |
+| `expired` | The hold passed `expires_at`. Not final: a late webhook can still confirm it if the slot is free |
 
-Hold milik customer lain, ID tidak dikenal, dan hold yang sudah dibersihkan (±1 jam setelah expired) → **404** dengan body yang sama, supaya endpoint ini tidak bisa dipakai mengecek keberadaan ID.
+A hold owned by another customer, an unknown ID, and a hold that was already cleaned up (about 1 hour after expiry) all return **404** with the same body, so this endpoint cannot be used to check whether an ID exists.
 
-**Rate limit** (in-memory, per IP + route):
+**Rate limits** (in-memory, per IP + route):
 
-| Endpoint | Batas |
+| Endpoint | Limit |
 |----------|-------|
-| `/admin/auth/login`, `/admin/admin-recovery/request`, `/admin/admin-recovery/:token/reset` | 10/menit |
-| `/customer/login`, `/customer/forgot-password`, `/customer/reset-password/:token`, `/customer/change-password` | 10/menit |
-| `/customer/bookings/by-hold/:hold_id` | 30/menit |
+| `/admin/auth/login`, `/admin/admin-recovery/request`, `/admin/admin-recovery/:token/reset` | 10/minute |
+| `/customer/login`, `/customer/forgot-password`, `/customer/reset-password/:token`, `/customer/change-password` | 10/minute |
+| `/customer/bookings/by-hold/:hold_id` | 30/minute |
 
-Lewat batas → **429**. Di belakang reverse proxy, `TRUSTED_PROXIES` wajib diset. Tanpa itu, `c.ClientIP()` = IP proxy, sehingga semua user berbagi satu kuota.
+Over the limit → **429**. Behind a reverse proxy, `TRUSTED_PROXIES` must be set. Without it, `c.ClientIP()` is the proxy IP, so all users share one quota.
 
 ---
 
-## Sistem Email
+## Email System
 
-### Arsitektur pengiriman email
+### Email delivery architecture
 
 ```
 Trigger (create booking / create voucher / create customer)
   │
-  ├─► ntService.GetRendered(key, vars)   ← ambil template dari DB
+  ├─► ntService.GetRendered(key, vars)   ← load the template from the DB
   │     │
-  │     ├── Template ditemukan & aktif
+  │     ├── Template found & active
   │     │     └─► utils.SendEmail()      ← plain text + generic card wrapper
   │     │
-  │     └── Template tidak ada / error
-  │           └─► utils.SendHTMLEmail()  ← HTML berdesain (BuildBookingEmailHTML / BuildVoucherEmailHTML)
+  │     └── Template missing / error
+  │           └─► utils.SendHTMLEmail()  ← designed HTML (BuildBookingEmailHTML / BuildVoucherEmailHTML)
   │
-  └── [semua proses di goroutine — tidak memblokir HTTP response]
+  └── [everything runs in a goroutine; it does not block the HTTP response]
 ```
 
-### Fungsi utilitas email
+### Email utility functions
 
-| Fungsi | Kapan dipakai |
-|--------|--------------|
-| `SendEmail(to, name, subject, plainText)` | Template DB (plain text dengan `\n`, auto-wrap card) |
-| `SendHTMLEmail(to, name, subject, html)` | Template hardcode berdesain (booking & voucher fallback) |
-| `SendCustomerPasswordEmail(to, name, pwd)` | Fallback welcome email jika DB template tidak ada |
-| `BuildBookingEmailHTML(...)` | HTML email booking konfirmasi berdesain |
-| `BuildVoucherEmailHTML(...)` | HTML email notifikasi voucher berdesain |
+| Function | When it is used |
+|----------|-----------------|
+| `SendEmail(to, name, subject, plainText)` | DB template (plain text with `\n`, auto-wrapped in a card) |
+| `SendHTMLEmail(to, name, subject, html)` | Hardcoded designed template (booking & voucher fallback) |
+| `SendCustomerPasswordEmail(to, name, pwd)` | Fallback welcome email when the DB template does not exist |
+| `BuildBookingEmailHTML(...)` | Designed booking confirmation HTML |
+| `BuildVoucherEmailHTML(...)` | Designed voucher notification HTML |
 
-### Prioritas template
+### Template priority
 
-1. **DB template** (`notification_templates` table) — bisa dikustomisasi admin via `PUT /notification-templates/:key`
-2. **Hardcode fallback** — HTML berdesain bawaan (booking & voucher), `SendCustomerPasswordEmail` (customer welcome)
+1. **DB template** (`notification_templates` table): admins can customize it via `PUT /notification-templates/:key`
+2. **Hardcoded fallback**: built-in designed HTML (booking & voucher), `SendCustomerPasswordEmail` (customer welcome)
 
-### Konfigurasi SMTP (Gmail)
+### SMTP configuration (Gmail)
 
-1. Aktifkan **2-Step Verification** di akun Google
-2. Buat **App Password** di [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords)
-3. Isi `SMTP_PASSWORD` dengan App Password tersebut (16 karakter tanpa spasi)
+1. Enable **2-Step Verification** on the Google account
+2. Create an **App Password** at [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords)
+3. Put that App Password in `SMTP_PASSWORD` (16 characters, no spaces)
 
 ---
 
-## Autentikasi
+## Authentication
 
-Token JWT dikirim lewat **cookie HttpOnly**, bukan header `Authorization` (header tidak diterima).
+The JWT is sent in an **HttpOnly cookie**, not in the `Authorization` header (the header is not accepted).
 
-| Aplikasi | Cookie | Path |
-|----------|--------|------|
+| App | Cookie | Path |
+|-----|--------|------|
 | Admin (staff) | `staff_token` | `/api/admin` |
 | Customer web | `customer_token` | `/api/customer` |
 
-Path cookie dipisah supaya token staff tidak pernah terkirim ke rute customer, dan sebaliknya. Request yang mengubah data (POST/PUT/PATCH/DELETE) dengan header `Origin` yang tidak terdaftar di `ALLOWED_ORIGINS` ditolak (proteksi CSRF).
+The cookie paths are separate so a staff token is never sent to customer routes, and the reverse. State-changing requests (POST/PUT/PATCH/DELETE) with an `Origin` header that is not listed in `ALLOWED_ORIGINS` are rejected (CSRF protection).
 
-JWT staff berisi: `staff_id`, `username`, `role_id`, `is_system`, `permissions[]`
-
----
-
-## Konvensi Audit Fields
-
-Setiap record memiliki kolom:
-
-| Kolom | Isi |
-|-------|-----|
-| `created_by` | Username staff yang membuat |
-| `updated_by` | Username staff yang terakhir update |
-| `deleted_by` | Username staff yang menghapus |
-| `deleted_at` | Timestamp soft delete (null = aktif) |
-
-> **Booking** tidak menggunakan soft delete — record bersifat permanen sebagai catatan keuangan.
+The staff JWT contains: `staff_id`, `username`, `role_id`, `is_system`, `permissions[]`
 
 ---
 
-## Logika Pricing Engine
+## Audit Field Convention
 
-Urutan penerapan harga saat `POST /pricing/calculate` atau membuat booking:
+Every record has these columns:
 
-1. **Flash sale** — hitung overlap menit antara waktu booking dan window flash sale aktif; bagian yang overlap menggunakan `price_per_hour` flash sale (bukan diskon, langsung harga per jam)
-2. **Sisa durasi** (non-flash) — cek `isWeekdayForPricing()`:
-   - Global holiday → harga **normal** (happy hour nonaktif)
-   - Store holiday → harga **normal** (happy hour nonaktif)
-   - Senin–Kamis → cek jadwal **happy hour** (jika masuk → pakai harga HH, kalau tidak → cek package price → normal)
-   - Jumat–Minggu → cek **package price** → normal
-3. **Voucher** — diskon voucher diterapkan di atas `final_price` (hanya saat booking)
+| Column | Content |
+|--------|---------|
+| `created_by` | Username of the staff who created it |
+| `updated_by` | Username of the staff who last updated it |
+| `deleted_by` | Username of the staff who deleted it |
+| `deleted_at` | Soft delete timestamp (null = active) |
 
-**Flash sale** menggunakan field `price_per_hour` (tarif per jam langsung, bukan diskon persen). Contoh: flash sale `price_per_hour = 50.000` aktif 19:00–21:00, booking 19:00–23:00 → 2 jam × 50.000 + 2 jam harga normal/HH.
+> **Bookings** do not use soft delete. Records are permanent because they are financial records.
 
 ---
 
-## Alur Booking
+## Pricing Engine Logic
+
+Order of price rules for `POST /pricing/calculate` or when creating a booking:
+
+1. **Flash sale**: compute the minute overlap between the booking time and active flash sale windows; the overlapping part uses the flash sale `price_per_hour` (a direct hourly rate, not a discount)
+2. **Remaining duration** (non-flash): check `isWeekdayForPricing()`:
+   - Global holiday → **normal** price (happy hour disabled)
+   - Store holiday → **normal** price (happy hour disabled)
+   - Monday–Thursday → check the **happy hour** schedule (inside → HH price, otherwise → package price → normal)
+   - Friday–Sunday → check the **package price** → normal
+3. **Voucher**: the voucher discount is applied on top of `final_price` (booking only)
+
+**Flash sale** uses the `price_per_hour` field (a direct hourly rate, not a percentage discount). Example: flash sale `price_per_hour = 50,000` active 19:00–21:00, booking 19:00–23:00 → 2 hours × 50,000 + 2 hours at normal/HH price.
+
+---
+
+## Booking Flow
 
 ```
 POST /bookings
-  ├── Cek overlap jadwal room (regular booking di room yang sama)
-  ├── Cek overlap event booking (event aktif di store yang sama pada jam tersebut)
-  ├── Hitung harga via pricing engine
-  ├── Validasi voucher (opsional, khusus member)
-  ├── Validasi play credits (opsional, khusus member)
-  ├── Generate kode booking (BK-YYMMDD-XXXX)
-  ├── Simpan record booking
-  └── [goroutine] Potong play credits + redeem voucher + kirim email notifikasi
+  ├── Check room schedule overlap (regular bookings in the same room)
+  ├── Check event booking overlap (active events in the same store at that time)
+  ├── Calculate the price with the pricing engine
+  ├── Validate the voucher (optional, members only)
+  ├── Validate play credits (optional, members only)
+  ├── Generate the booking code (BK-YYMMDD-XXXX)
+  ├── Save the booking record
+  └── [goroutine] Deduct play credits + redeem voucher + send notification email
 ```
 
-## Alur Booking Online (Customer)
+## Online Booking Flow (Customer)
 
 ```
 POST /customer/bookings/initiate
-  ├── Hitung harga (sama dengan /public/booking/quote)
-  ├── Buat booking_hold (kunci unit room, berlaku 15 menit) + invoice Xendit
-  └── Redirect Xendit → {APP_URL}/payment/success?hold_id=<id>
+  ├── Calculate the price (same as /public/booking/quote)
+  ├── Create booking_hold (locks a room unit, valid for 15 minutes) + Xendit invoice
+  └── Xendit redirects → {APP_URL}/payment/success?hold_id=<id>
 
 POST /webhook/xendit (status PAID)
-  ├── Hold expired + slot sudah terisi → log [PAYMENT ORPHAN], perlu refund manual
-  ├── Transaction: hapus hold + buat booking (bookings.hold_id = id hold)
-  └── [goroutine] Kirim email konfirmasi
+  ├── Hold expired + slot already taken → log [PAYMENT ORPHAN], manual refund needed
+  ├── Transaction: delete the hold + create the booking (bookings.hold_id = hold id)
+  └── [goroutine] Send the confirmation email
 
-GET /customer/bookings/by-hold/:hold_id   ← dipolling halaman payment success
+GET /customer/bookings/by-hold/:hold_id   ← polled by the payment success page
   └── pending → confirmed (booking_code) / expired
 ```
 
-## Alur Event Booking
+## Event Booking Flow
 
 ```
 POST /event-bookings
-  ├── Hitung durasi otomatis dari start_time - end_time
-  ├── Cek overlap: ada regular booking di store & jam tersebut? → tolak (termasuk tanggal sebelum/sesudah)
-  ├── Cek overlap: ada event booking lain di store & jam tersebut? → tolak
-  ├── Ambil harga event dari store_event_prices
-  ├── Hitung total: round((price_per_day ÷ 24 × hours) / 1000) × 1000
-  └── Simpan event booking (status: upcoming)
+  ├── Calculate the duration from start_time - end_time
+  ├── Overlap check: regular booking in the store at that time? → reject (includes the previous/next date)
+  ├── Overlap check: another event booking in the store at that time? → reject
+  ├── Load the event price from store_event_prices
+  ├── Calculate the total: round((price_per_day ÷ 24 × hours) / 1000) × 1000
+  └── Save the event booking (status: upcoming)
 ```
 
 ---
