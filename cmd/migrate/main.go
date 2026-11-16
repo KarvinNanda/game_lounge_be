@@ -110,6 +110,7 @@ func main() {
 	}
 
 	upgradeWelcomeTemplate(db)
+	softDeleteRoomsOfDeletedStores(db)
 
 	seedSuperAdmin(db)
 

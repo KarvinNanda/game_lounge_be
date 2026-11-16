@@ -1,6 +1,8 @@
 package service
 
 import (
+	"gorm.io/gorm"
+
 	"errors"
 	"fmt"
 	"game_lounge_be/config"
@@ -139,50 +141,57 @@ func CreateStore(req dto.CreateStoreRequest, createdBy string) (*models.Store, e
 		return nil, err
 	}
 
-	if err := repository.CreateStore(store); err != nil {
-		return nil, errors.New("gagal membuat store")
-	}
+	// Every write below commits together or not at all.
+	err = config.DB.Transaction(func(tx *gorm.DB) error {
+		if err := repository.CreateStore(tx, store); err != nil {
+			return errors.New("gagal membuat store")
+		}
 
-	// Save operating hours
-	if len(req.OperatingHours) > 0 {
-		var hours []models.StoreOperatingHour
-		for _, h := range req.OperatingHours {
-			hours = append(hours, models.StoreOperatingHour{
-				StoreID:   store.ID,
-				DayType:   h.DayType,
-				OpenTime:  h.OpenTime,
-				CloseTime: h.CloseTime,
-				IsActive:  h.IsActive,
-				CreatedBy: &createdBy,
-			})
+		// Save operating hours
+		if len(req.OperatingHours) > 0 {
+			var hours []models.StoreOperatingHour
+			for _, h := range req.OperatingHours {
+				hours = append(hours, models.StoreOperatingHour{
+					StoreID:   store.ID,
+					DayType:   h.DayType,
+					OpenTime:  h.OpenTime,
+					CloseTime: h.CloseTime,
+					IsActive:  h.IsActive,
+					CreatedBy: &createdBy,
+				})
+			}
+			if err := repository.UpsertOperatingHours(tx, store.ID, hours); err != nil {
+				return errors.New("gagal menyimpan jam operasional")
+			}
 		}
-		if err := repository.UpsertOperatingHours(store.ID, hours); err != nil {
-			return nil, errors.New("gagal menyimpan jam operasional")
-		}
-	}
 
-	// Save holidays
-	if len(req.Holidays) > 0 {
-		var holidays []models.StoreHolidaySchedule
-		for _, h := range req.Holidays {
-			date, _ := time.Parse("2006-01-02", h.Date)
-			holidays = append(holidays, models.StoreHolidaySchedule{
-				StoreID:   store.ID,
-				Date:      date,
-				OpenTime:  h.OpenTime,
-				CloseTime: h.CloseTime,
-				CreatedBy: &createdBy,
-			})
+		// Save holidays
+		if len(req.Holidays) > 0 {
+			var holidays []models.StoreHolidaySchedule
+			for _, h := range req.Holidays {
+				date, _ := time.Parse("2006-01-02", h.Date)
+				holidays = append(holidays, models.StoreHolidaySchedule{
+					StoreID:   store.ID,
+					Date:      date,
+					OpenTime:  h.OpenTime,
+					CloseTime: h.CloseTime,
+					CreatedBy: &createdBy,
+				})
+			}
+			if err := repository.UpsertHolidaySchedules(tx, store.ID, holidays); err != nil {
+				return errors.New("gagal menyimpan jadwal libur")
+			}
 		}
-		if err := repository.UpsertHolidaySchedules(store.ID, holidays); err != nil {
-			return nil, errors.New("gagal menyimpan jadwal libur")
-		}
-	}
 
-	if len(newRooms) > 0 {
-		if err := repository.CreateStoreRooms(newRooms); err != nil {
-			return nil, errors.New("gagal membuat unit ruangan")
+		if len(newRooms) > 0 {
+			if err := repository.CreateStoreRooms(tx, newRooms); err != nil {
+				return errors.New("gagal membuat unit ruangan")
+			}
 		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	return GetStoreByID(store.ID)
@@ -219,50 +228,57 @@ func UpdateStore(id string, req dto.UpdateStoreRequest, updatedBy string) (*mode
 		store.PhotoURL = &req.PhotoURL
 	}
 
-	if err := repository.UpdateStore(store); err != nil {
-		return nil, errors.New("gagal update store")
-	}
+	// Every write below commits together or not at all.
+	err = config.DB.Transaction(func(tx *gorm.DB) error {
+		if err := repository.UpdateStore(tx, store); err != nil {
+			return errors.New("gagal update store")
+		}
 
-	// Update operating hours
-	if len(req.OperatingHours) > 0 {
-		var hours []models.StoreOperatingHour
-		for _, h := range req.OperatingHours {
-			hours = append(hours, models.StoreOperatingHour{
-				StoreID:   id,
-				DayType:   h.DayType,
-				OpenTime:  h.OpenTime,
-				CloseTime: h.CloseTime,
-				IsActive:  h.IsActive,
-				UpdatedBy: &updatedBy,
-			})
+		// Update operating hours
+		if len(req.OperatingHours) > 0 {
+			var hours []models.StoreOperatingHour
+			for _, h := range req.OperatingHours {
+				hours = append(hours, models.StoreOperatingHour{
+					StoreID:   id,
+					DayType:   h.DayType,
+					OpenTime:  h.OpenTime,
+					CloseTime: h.CloseTime,
+					IsActive:  h.IsActive,
+					UpdatedBy: &updatedBy,
+				})
+			}
+			if err := repository.UpsertOperatingHours(tx, id, hours); err != nil {
+				return errors.New("gagal update jam operasional")
+			}
 		}
-		if err := repository.UpsertOperatingHours(id, hours); err != nil {
-			return nil, errors.New("gagal update jam operasional")
-		}
-	}
 
-	// Update holidays
-	if len(req.Holidays) > 0 {
-		var holidays []models.StoreHolidaySchedule
-		for _, h := range req.Holidays {
-			date, _ := time.Parse("2006-01-02", h.Date)
-			holidays = append(holidays, models.StoreHolidaySchedule{
-				StoreID:   id,
-				Date:      date,
-				OpenTime:  h.OpenTime,
-				CloseTime: h.CloseTime,
-				UpdatedBy: &updatedBy,
-			})
+		// Update holidays
+		if len(req.Holidays) > 0 {
+			var holidays []models.StoreHolidaySchedule
+			for _, h := range req.Holidays {
+				date, _ := time.Parse("2006-01-02", h.Date)
+				holidays = append(holidays, models.StoreHolidaySchedule{
+					StoreID:   id,
+					Date:      date,
+					OpenTime:  h.OpenTime,
+					CloseTime: h.CloseTime,
+					UpdatedBy: &updatedBy,
+				})
+			}
+			if err := repository.UpsertHolidaySchedules(tx, id, holidays); err != nil {
+				return errors.New("gagal update jadwal libur")
+			}
 		}
-		if err := repository.UpsertHolidaySchedules(id, holidays); err != nil {
-			return nil, errors.New("gagal update jadwal libur")
-		}
-	}
 
-	if len(newRooms) > 0 {
-		if err := repository.CreateStoreRooms(newRooms); err != nil {
-			return nil, errors.New("gagal menambah unit ruangan")
+		if len(newRooms) > 0 {
+			if err := repository.CreateStoreRooms(tx, newRooms); err != nil {
+				return errors.New("gagal menambah unit ruangan")
+			}
 		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	return GetStoreByID(id)

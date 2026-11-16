@@ -3,6 +3,8 @@ package models
 import (
 	"time"
 
+	"gorm.io/gorm"
+
 	"game_lounge_be/money"
 )
 
@@ -18,4 +20,14 @@ type VoucherUsage struct {
 	UsedAt         time.Time    `gorm:"default:CURRENT_TIMESTAMP(3)" json:"used_at"`
 
 	Customer Customer `gorm:"foreignKey:CustomerID" json:"customer,omitempty"`
+}
+
+// BeforeCreate fills used_at from the app clock. Without it GORM leaves the
+// column to the DB default CURRENT_TIMESTAMP, which uses the DB server timezone
+// while every other timestamp uses the app's (loc=Local in the DSN).
+func (u *VoucherUsage) BeforeCreate(tx *gorm.DB) error {
+	if u.UsedAt.IsZero() {
+		u.UsedAt = time.Now()
+	}
+	return nil
 }
