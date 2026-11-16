@@ -4,6 +4,6 @@
 - Always use the `superpowers` skills (brainstorming, systematic-debugging, TDD, verification-before-completion, and the rest).
 
 ## Git and GitHub
-- Only make changes in the working tree. Karvin does all commits, pushes and PRs himself.
-- Do not run `git commit`, `git push`, or create branches.
-- Do not touch GitHub in any way: no issues, PRs, comments or `gh` commands. Report bugs and pending work in chat instead.
+- Claude may commit, push feature branches, and open PRs with `gh` (changed 2026-11-16, Karvin's decision).
+- Karvin reviews and merges every PR. Claude never merges and never pushes to `main`.
+- No GitHub issues or comments: report bugs and pending work in chat instead.
