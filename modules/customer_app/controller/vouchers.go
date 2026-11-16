@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"game_lounge_be/money"
+
 	"net/http"
 	"time"
 
@@ -14,16 +16,16 @@ import (
 )
 
 type VoucherResult struct {
-	ID            string   `json:"voucher_id"`
-	Code          string   `json:"code"`
-	Name          string   `json:"name"`
-	Description   *string  `json:"description"`
-	DiscountType  string   `json:"discount_type"`
-	DiscountValue float64  `json:"discount_value"`
-	MaxDiscount   *float64 `json:"max_discount"`
-	MinPurchase   float64  `json:"min_purchase"`
-	EndDate       *string  `json:"end_date"`
-	IsAllStores   bool     `json:"is_all_stores"`
+	ID            string        `json:"voucher_id"`
+	Code          string        `json:"code"`
+	Name          string        `json:"name"`
+	Description   *string       `json:"description"`
+	DiscountType  string        `json:"discount_type"`
+	DiscountValue float64       `json:"discount_value"`
+	MaxDiscount   *money.Rupiah `json:"max_discount"`
+	MinPurchase   money.Rupiah  `json:"min_purchase"`
+	EndDate       *string       `json:"end_date"`
+	IsAllStores   bool          `json:"is_all_stores"`
 	// Set only for a voucher reserved by one of the customer's booking holds
 	// (include_reserved=true). The voucher returns after ReservedUntil.
 	ReservedUntil *time.Time `json:"reserved_until" gorm:"-"`

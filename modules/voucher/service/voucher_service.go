@@ -1,6 +1,8 @@
 package service
 
 import (
+	"game_lounge_be/money"
+
 	"errors"
 	"fmt"
 	"log"
@@ -9,9 +11,9 @@ import (
 	"time"
 
 	"game_lounge_be/models"
+	ntService "game_lounge_be/modules/notification_template/service"
 	"game_lounge_be/modules/voucher/dto"
 	"game_lounge_be/modules/voucher/repository"
-	ntService "game_lounge_be/modules/notification_template/service"
 	"game_lounge_be/utils"
 
 	"github.com/google/uuid"
@@ -113,6 +115,9 @@ func GenerateCode(name string) string {
 }
 
 func CreateVoucher(req dto.CreateVoucherRequest, createdBy string) (*VoucherWithStatus, error) {
+	if err := validateNominalValue(req.DiscountType, req.DiscountValue); err != nil {
+		return nil, err
+	}
 	// Cek duplikasi kode
 	if repository.IsCodeExists(req.Code, "") {
 		return nil, errors.New("kode voucher sudah digunakan")
@@ -139,7 +144,7 @@ func CreateVoucher(req dto.CreateVoucherRequest, createdBy string) (*VoucherWith
 	if req.SendChannel != "" {
 		channel = &req.SendChannel
 	}
-	var maxDiscount, minPurchase *float64
+	var maxDiscount, minPurchase *money.Rupiah
 	if req.MaxDiscount > 0 {
 		maxDiscount = &req.MaxDiscount
 	}
@@ -261,6 +266,9 @@ func sendVoucherNotification(v *models.Voucher, channel string) {
 }
 
 func UpdateVoucher(id string, req dto.UpdateVoucherRequest, updatedBy string) (*VoucherWithStatus, error) {
+	if err := validateNominalValue(req.DiscountType, req.DiscountValue); err != nil {
+		return nil, err
+	}
 	voucher, err := repository.FindVoucherByID(id)
 	if err != nil {
 		return nil, errors.New("voucher tidak ditemukan")
@@ -280,7 +288,7 @@ func UpdateVoucher(id string, req dto.UpdateVoucherRequest, updatedBy string) (*
 	if req.Description != "" {
 		desc = &req.Description
 	}
-	var maxDiscount, minPurchase *float64
+	var maxDiscount, minPurchase *money.Rupiah
 	if req.MaxDiscount > 0 {
 		maxDiscount = &req.MaxDiscount
 	}
@@ -389,7 +397,7 @@ func ValidateVoucher(req dto.ValidateVoucherRequest) (*dto.ValidateVoucherRespon
 	if voucher.MinPurchase != nil && req.Amount < *voucher.MinPurchase {
 		return &dto.ValidateVoucherResponse{
 			IsValid: false,
-			Message: fmt.Sprintf("Minimum pembelian Rp %.0f", *voucher.MinPurchase),
+			Message: fmt.Sprintf("Minimum pembelian Rp %d", *voucher.MinPurchase),
 		}, nil
 	}
 
@@ -424,20 +432,32 @@ func ValidateVoucher(req dto.ValidateVoucherRequest) (*dto.ValidateVoucherRespon
 }
 
 // calculateDiscount menghitung nominal diskon berdasarkan tipe.
-func calculateDiscount(amount float64, v *models.Voucher) float64 {
-	var discount float64
+// Persen dibulatkan half up ke rupiah (money.PercentOf), sama dengan math.Round
+// pada versi float sebelumnya.
+func calculateDiscount(amount money.Rupiah, v *models.Voucher) money.Rupiah {
+	var discount money.Rupiah
 	if v.DiscountType == "percentage" {
-		discount = math.Round(amount * v.DiscountValue / 100)
+		discount = money.PercentOf(amount, v.DiscountValue)
 		if v.MaxDiscount != nil && discount > *v.MaxDiscount {
 			discount = *v.MaxDiscount
 		}
 	} else {
-		discount = v.DiscountValue
+		// validateNominalValue keeps nominal values whole.
+		discount = money.Rupiah(v.DiscountValue)
 	}
 	if discount > amount {
 		discount = amount
 	}
 	return discount
+}
+
+// validateNominalValue: discount_value holds a percentage or a rupiah amount,
+// depending on discount_type. A rupiah amount must be whole.
+func validateNominalValue(discountType string, value float64) error {
+	if discountType == "nominal" && value != math.Trunc(value) {
+		return errors.New("discount_value nominal harus rupiah bulat")
+	}
+	return nil
 }
 
 // GetRecipientCount menghitung berapa member yang akan menerima voucher.
@@ -447,7 +467,7 @@ func GetRecipientCount(isAllRoomTypes bool, roomTemplateIDs []uint) (int64, erro
 }
 
 // RedeemVoucher catat pemakaian voucher (dipanggil dari modul Booking).
-func RedeemVoucher(voucherID, customerID, bookingID string, discountAmount float64) error {
+func RedeemVoucher(voucherID, customerID, bookingID string, discountAmount money.Rupiah) error {
 	usage := &models.VoucherUsage{
 		VoucherID:      voucherID,
 		CustomerID:     customerID,

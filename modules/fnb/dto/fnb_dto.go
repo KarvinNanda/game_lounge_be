@@ -1,5 +1,7 @@
 package dto
 
+import "game_lounge_be/money"
+
 // ── Categories ────────────────────────────────────────────────
 
 type CreateCategoryRequest struct {
@@ -18,28 +20,28 @@ type UpdateCategoryRequest struct {
 // ── Items ─────────────────────────────────────────────────────
 
 type CreateItemRequest struct {
-	CategoryID  uint    `json:"category_id" binding:"required"`
-	Name        string  `json:"name" binding:"required,min=1,max=150"`
-	Description string  `json:"description"`
-	Price       float64 `json:"price" binding:"min=0"`
-	SortOrder   int     `json:"sort_order"`
+	CategoryID  uint         `json:"category_id" binding:"required"`
+	Name        string       `json:"name" binding:"required,min=1,max=150"`
+	Description string       `json:"description"`
+	Price       money.Rupiah `json:"price" binding:"min=0"`
+	SortOrder   int          `json:"sort_order"`
 }
 
 type UpdateItemRequest struct {
-	CategoryID  uint    `json:"category_id" binding:"required"`
-	Name        string  `json:"name" binding:"required,min=1,max=150"`
-	Description string  `json:"description"`
-	Price       float64 `json:"price" binding:"min=0"`
-	SortOrder   int     `json:"sort_order"`
-	IsAvailable bool    `json:"is_available"`
-	IsActive    bool    `json:"is_active"`
+	CategoryID  uint         `json:"category_id" binding:"required"`
+	Name        string       `json:"name" binding:"required,min=1,max=150"`
+	Description string       `json:"description"`
+	Price       money.Rupiah `json:"price" binding:"min=0"`
+	SortOrder   int          `json:"sort_order"`
+	IsAvailable bool         `json:"is_available"`
+	IsActive    bool         `json:"is_active"`
 }
 
 // ── Orders ────────────────────────────────────────────────────
 
 type CreateFnbOrderRequest struct {
-	BookingID string           `json:"booking_id" binding:"required"`
-	Notes     string           `json:"notes"`
+	BookingID string            `json:"booking_id" binding:"required"`
+	Notes     string            `json:"notes"`
 	Items     []FnbOrderItemReq `json:"items" binding:"required,min=1,max=30,dive"`
 }
 

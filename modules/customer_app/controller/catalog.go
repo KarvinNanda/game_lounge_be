@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"game_lounge_be/money"
+
 	"net/http"
 	"strconv"
 
@@ -39,11 +41,11 @@ func RoomRecommendations(c *gin.Context) {
 	// Tambahkan harga terendah paket 1 jam per room template
 	type RoomWithPrice struct {
 		models.RoomTemplate
-		MinPrice float64 `json:"min_price"`
+		MinPrice money.Rupiah `json:"min_price"`
 	}
 	result := make([]RoomWithPrice, 0, len(rooms))
 	for _, r := range rooms {
-		var minPrice float64
+		var minPrice money.Rupiah
 		config.DB.Table("store_package_prices").
 			Where("room_template_id = ? AND duration_hours = 1 AND deleted_at IS NULL", r.ID).
 			Select("MIN(price)").Scan(&minPrice)
@@ -78,13 +80,13 @@ func PublicGetStoreByID(c *gin.Context) {
 // publicRoomTemplate & publicFacility = whitelist field untuk endpoint public.
 // Kolom audit (created_by/updated_by berisi username staff) tidak boleh keluar.
 type publicRoomTemplate struct {
-	ID          uint    `json:"id"`
-	Name        string  `json:"name"`
-	Description *string `json:"description"`
-	ImageURL    *string `json:"image_url"`
-	CapacityMin uint    `json:"capacity_min"`
-	CapacityMax uint    `json:"capacity_max"`
-	MinPrice    float64 `json:"min_price"`
+	ID          uint         `json:"id"`
+	Name        string       `json:"name"`
+	Description *string      `json:"description"`
+	ImageURL    *string      `json:"image_url"`
+	CapacityMin uint         `json:"capacity_min"`
+	CapacityMax uint         `json:"capacity_max"`
+	MinPrice    money.Rupiah `json:"min_price"`
 }
 
 // publicRoomTemplateDetail: detail selalu mengirim key facilities (minimal []).
@@ -100,7 +102,7 @@ type publicFacility struct {
 	Description *string `json:"description"`
 }
 
-func toPublicRoomTemplate(t models.RoomTemplate, minPrice float64) publicRoomTemplate {
+func toPublicRoomTemplate(t models.RoomTemplate, minPrice money.Rupiah) publicRoomTemplate {
 	return publicRoomTemplate{
 		ID: t.ID, Name: t.Name, Description: t.Description, ImageURL: t.ImageURL,
 		CapacityMin: t.CapacityMin, CapacityMax: t.CapacityMax, MinPrice: minPrice,
@@ -139,7 +141,7 @@ func PublicGetRoomTemplates(c *gin.Context) {
 	// Tambahkan min_price dari store yang dipilih (paket 1 jam)
 	result := []publicRoomTemplate{}
 	for _, t := range templates {
-		var minPrice float64
+		var minPrice money.Rupiah
 
 		if storeID != "" {
 			// Harga minimum dari store spesifik yang dipilih
@@ -179,7 +181,7 @@ func PublicGetRoomTemplateByID(c *gin.Context) {
 	}
 
 	// Hitung min_price global (paket 1 jam di semua store)
-	var minPrice float64
+	var minPrice money.Rupiah
 	config.DB.Table("store_package_prices").
 		Where("room_template_id = ? AND duration_hours = 1 AND deleted_at IS NULL", id).
 		Select("MIN(price)").Scan(&minPrice)
@@ -221,15 +223,15 @@ func GetBookingSlots(c *gin.Context) {
 		Count(&totalRooms)
 
 	type SlotResult struct {
-		StartTime string  `json:"start_time"`
-		EndTime   string  `json:"end_time"`
-		Available bool    `json:"available"`
-		Price     float64 `json:"price"`
+		StartTime string       `json:"start_time"`
+		EndTime   string       `json:"end_time"`
+		Available bool         `json:"available"`
+		Price     money.Rupiah `json:"price"`
 	}
 	slots := make([]SlotResult, 0, len(daySlots))
 	for _, sl := range daySlots {
 		// Harga slot ini (1 jam) via pricing service
-		slotPrice := 0.0
+		var slotPrice money.Rupiah
 		if priceResult, err := pricingService.CalculatePrice(pricingDto.CalculatePriceRequest{
 			StoreID:        storeID,
 			RoomTemplateID: uint(roomTemplateID),

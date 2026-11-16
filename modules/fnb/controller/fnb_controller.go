@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"game_lounge_be/money"
+
 	"net/http"
 	"strconv"
 
@@ -19,12 +21,12 @@ func GetPublicMenu(c *gin.Context) {
 	cats, _ := service.GetAllCategories()
 
 	type publicItem struct {
-		ID          uint    `json:"id"`
-		Name        string  `json:"name"`
-		Description *string `json:"description"`
-		ImageURL    *string `json:"image_url"`
-		Price       float64 `json:"price"`
-		SortOrder   int     `json:"sort_order"`
+		ID          uint         `json:"id"`
+		Name        string       `json:"name"`
+		Description *string      `json:"description"`
+		ImageURL    *string      `json:"image_url"`
+		Price       money.Rupiah `json:"price"`
+		SortOrder   int          `json:"sort_order"`
 	}
 	type publicCategory struct {
 		ID          uint         `json:"id"`
@@ -112,7 +114,7 @@ func AdminDeleteCategory(c *gin.Context) {
 
 func AdminGetItems(c *gin.Context) {
 	catID, _ := strconv.Atoi(c.Query("category_id"))
-	items, _  := service.GetAllItems(uint(catID), false)
+	items, _ := service.GetAllItems(uint(catID), false)
 	utils.ResponseSuccess(c, http.StatusOK, "OK", items)
 }
 
@@ -148,9 +150,9 @@ func AdminUpdateItem(c *gin.Context) {
 // ── Admin: Orders ─────────────────────────────────────────────
 
 func AdminGetOrders(c *gin.Context) {
-	storeID    := c.Query("store_id")
-	status     := c.Query("status")
-	page, _    := strconv.Atoi(c.DefaultQuery("page", "1"))
+	storeID := c.Query("store_id")
+	status := c.Query("status")
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "20"))
 	if page < 1 {
 		page = 1

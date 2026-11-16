@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"game_lounge_be/money"
+
 	"time"
 
 	"game_lounge_be/config"
@@ -66,7 +68,7 @@ func FindAll(storeID, status, dateFrom, dateTo string, page, perPage int) ([]mod
 	}
 
 	q.Count(&total)
-	err := q.Offset((page-1)*perPage).Limit(perPage).
+	err := q.Offset((page - 1) * perPage).Limit(perPage).
 		Order("booking_date DESC, start_time DESC").Find(&bookings).Error
 
 	return bookings, total, err
@@ -245,7 +247,7 @@ func GetEventPrice(storeID string) (*models.StoreEventPrice, error) {
 }
 
 // UpsertEventPrice menyimpan harga event untuk store (insert or update).
-func UpsertEventPrice(storeID string, pricePerDay float64, updatedBy string) (*models.StoreEventPrice, error) {
+func UpsertEventPrice(storeID string, pricePerDay money.Rupiah, updatedBy string) (*models.StoreEventPrice, error) {
 	var price models.StoreEventPrice
 	err := config.DB.Where("store_id = ?", storeID).First(&price).Error
 	if err != nil {
@@ -259,7 +261,7 @@ func UpsertEventPrice(storeID string, pricePerDay float64, updatedBy string) (*m
 	} else {
 		// Sudah ada → update
 		price.PricePerDay = pricePerDay
-		price.UpdatedBy   = &updatedBy
+		price.UpdatedBy = &updatedBy
 		err = config.DB.Save(&price).Error
 	}
 	return &price, err

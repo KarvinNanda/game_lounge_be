@@ -1,27 +1,29 @@
 package dto
 
+import "game_lounge_be/money"
+
 // ── Package ───────────────────────────────────────────────────────────────────
 
 type CreatePackageRequest struct {
-	Name             string   `form:"name" binding:"required,min=2,max=100"`
-	TotalHours       float64  `form:"total_hours" binding:"required,min=0.5"`
-	Price            float64  `form:"price" binding:"required,min=0"`
-	ValidityDays     uint     `form:"validity_days" binding:"required,min=1"`
-	Description      string   `form:"description"`
-	IsActive         *bool    `form:"is_active"`
-	ApplyToAllStores bool     `form:"apply_to_all_stores"`
-	StoreIDs         []string `form:"store_ids[]"`
+	Name             string       `form:"name" binding:"required,min=2,max=100"`
+	TotalHours       float64      `form:"total_hours" binding:"required,min=0.5"`
+	Price            money.Rupiah `form:"price" binding:"required,min=0"`
+	ValidityDays     uint         `form:"validity_days" binding:"required,min=1"`
+	Description      string       `form:"description"`
+	IsActive         *bool        `form:"is_active"`
+	ApplyToAllStores bool         `form:"apply_to_all_stores"`
+	StoreIDs         []string     `form:"store_ids[]"`
 }
 
 type UpdatePackageRequest struct {
-	Name             string   `form:"name" binding:"required,min=2,max=100"`
-	TotalHours       float64  `form:"total_hours" binding:"required,min=0.5"`
-	Price            float64  `form:"price" binding:"required,min=0"`
-	ValidityDays     uint     `form:"validity_days" binding:"required,min=1"`
-	Description      string   `form:"description"`
-	IsActive         *bool    `form:"is_active"`
-	ApplyToAllStores bool     `form:"apply_to_all_stores"`
-	StoreIDs         []string `form:"store_ids[]"`
+	Name             string       `form:"name" binding:"required,min=2,max=100"`
+	TotalHours       float64      `form:"total_hours" binding:"required,min=0.5"`
+	Price            money.Rupiah `form:"price" binding:"required,min=0"`
+	ValidityDays     uint         `form:"validity_days" binding:"required,min=1"`
+	Description      string       `form:"description"`
+	IsActive         *bool        `form:"is_active"`
+	ApplyToAllStores bool         `form:"apply_to_all_stores"`
+	StoreIDs         []string     `form:"store_ids[]"`
 }
 
 type PackageFilter struct {
@@ -36,10 +38,10 @@ type PackageFilter struct {
 
 // AssignCreditRequest dipakai admin untuk assign credits ke customer secara manual.
 type AssignCreditRequest struct {
-	CustomerID    string  `json:"customer_id" binding:"required"`
-	PackageID     string  `json:"package_id" binding:"required"`
-	PaymentAmount float64 `json:"payment_amount"`
-	Notes         string  `json:"notes"`
+	CustomerID    string       `json:"customer_id" binding:"required"`
+	PackageID     string       `json:"package_id" binding:"required"`
+	PaymentAmount money.Rupiah `json:"payment_amount"`
+	Notes         string       `json:"notes"`
 }
 
 // AdjustCreditRequest dipakai admin untuk Tambah/Kurangi jam dan Perpanjang masa berlaku.

@@ -1,6 +1,8 @@
 package service
 
 import (
+	"game_lounge_be/money"
+
 	"fmt"
 	"os"
 	"testing"
@@ -125,7 +127,7 @@ func withInactive() func(*models.Voucher) {
 	}
 }
 
-func withMinPurchase(min float64) func(*models.Voucher) {
+func withMinPurchase(min money.Rupiah) func(*models.Voucher) {
 	return func(v *models.Voucher) {
 		v.MinPurchase = &min
 	}

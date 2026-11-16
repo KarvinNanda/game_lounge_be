@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"game_lounge_be/money"
+
 	"time"
 
 	"game_lounge_be/config"
@@ -38,7 +40,7 @@ func FindAllVouchers(search, status, vtype, storeID string, page, perPage int) (
 	}
 
 	query.Count(&total)
-	err := query.Offset((page-1)*perPage).Limit(perPage).
+	err := query.Offset((page - 1) * perPage).Limit(perPage).
 		Order("created_at DESC").Find(&vouchers).Error
 
 	return vouchers, total, err
@@ -147,7 +149,7 @@ func CreateUsage(usage *models.VoucherUsage) error {
 func GetVoucherStats() map[string]interface{} {
 	var totalVoucher, totalActive, totalExpired int64
 	var totalSent, totalUsed uint
-	var totalDiscount float64
+	var totalDiscount money.Rupiah
 
 	now := time.Now().Format("2006-01-02")
 	config.DB.Model(&models.Voucher{}).Where("deleted_at IS NULL").Count(&totalVoucher)

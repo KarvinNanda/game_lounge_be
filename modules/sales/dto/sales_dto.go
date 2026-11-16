@@ -1,10 +1,12 @@
 package dto
 
+import "game_lounge_be/money"
+
 // SalesFilter parameter filter untuk semua endpoint sales.
 // period: today | yesterday | this_week | this_month | custom
 // granularity (untuk trend): daily | weekly | monthly
 type SalesFilter struct {
-	Period      string `form:"period,default=today"`      // today | yesterday | this_week | this_month | custom
+	Period      string `form:"period,default=today"` // today | yesterday | this_week | this_month | custom
 	StoreID     string `form:"store_id"`
 	Type        string `form:"type"`                      // all | booking | play_credits
 	DateFrom    string `form:"date_from"`                 // wajib jika period=custom
@@ -16,11 +18,11 @@ type SalesFilter struct {
 
 // SalesStats adalah ringkasan metrik utama.
 type SalesStats struct {
-	TotalRevenue      float64 `json:"total_revenue"`
-	BookingRevenue    float64 `json:"booking_revenue"`
-	CreditsRevenue    float64 `json:"credits_revenue"`
-	TotalTransactions int64   `json:"total_transactions"`
-	AvgPerTransaction float64 `json:"avg_per_transaction"`
+	TotalRevenue      money.Rupiah `json:"total_revenue"`
+	BookingRevenue    money.Rupiah `json:"booking_revenue"`
+	CreditsRevenue    money.Rupiah `json:"credits_revenue"`
+	TotalTransactions int64        `json:"total_transactions"`
+	AvgPerTransaction money.Rupiah `json:"avg_per_transaction"`
 
 	// Perubahan vs periode sebelumnya (null jika custom atau tidak ada data sebelumnya)
 	TotalRevenueChange   *float64 `json:"total_revenue_change"`
@@ -32,47 +34,47 @@ type SalesStats struct {
 
 // RevenueByType breakdown pendapatan booking vs credits.
 type RevenueByType struct {
-	Type       string  `json:"type"`       // "booking" | "play_credits"
-	Label      string  `json:"label"`      // "Booking" | "Play Credits"
-	Revenue    float64 `json:"revenue"`
-	Percentage float64 `json:"percentage"` // 0–100, 1 desimal
+	Type       string       `json:"type"`  // "booking" | "play_credits"
+	Label      string       `json:"label"` // "Booking" | "Play Credits"
+	Revenue    money.Rupiah `json:"revenue"`
+	Percentage float64      `json:"percentage"` // 0–100, 1 desimal
 }
 
 // RevenueByBranch pendapatan per cabang.
 type RevenueByBranch struct {
-	StoreID    string  `json:"store_id"`
-	StoreName  string  `json:"store_name"`
-	Revenue    float64 `json:"revenue"`
-	Percentage float64 `json:"percentage"`
+	StoreID    string       `json:"store_id"`
+	StoreName  string       `json:"store_name"`
+	Revenue    money.Rupiah `json:"revenue"`
+	Percentage float64      `json:"percentage"`
 }
 
 // RevenueByRoomType pendapatan per tipe ruangan.
 type RevenueByRoomType struct {
-	RoomTemplateID uint    `json:"room_template_id"`
-	Name           string  `json:"name"`
-	Revenue        float64 `json:"revenue"`
-	Percentage     float64 `json:"percentage"`
+	RoomTemplateID uint         `json:"room_template_id"`
+	Name           string       `json:"name"`
+	Revenue        money.Rupiah `json:"revenue"`
+	Percentage     float64      `json:"percentage"`
 }
 
 // TrendPoint satu titik data untuk grafik trend.
 type TrendPoint struct {
-	Label          string  `json:"label"`
-	TotalRevenue   float64 `json:"total_revenue"`
-	BookingRevenue float64 `json:"booking_revenue"`
-	CreditsRevenue float64 `json:"credits_revenue"`
+	Label          string       `json:"label"`
+	TotalRevenue   money.Rupiah `json:"total_revenue"`
+	BookingRevenue money.Rupiah `json:"booking_revenue"`
+	CreditsRevenue money.Rupiah `json:"credits_revenue"`
 }
 
 // TransactionItem satu baris transaksi untuk modal detail / export.
 type TransactionItem struct {
-	ID           string  `json:"id"`
-	Date         string  `json:"date"`
-	Time         string  `json:"time"`
-	Type         string  `json:"type"`        // "booking" | "play_credits"
-	CustomerName string  `json:"customer_name"`
-	Description  string  `json:"description"` // nama room atau nama paket
-	StoreName    string  `json:"store_name"`
-	Amount       float64 `json:"amount"`
-	Status       string  `json:"status"`
+	ID           string       `json:"id"`
+	Date         string       `json:"date"`
+	Time         string       `json:"time"`
+	Type         string       `json:"type"` // "booking" | "play_credits"
+	CustomerName string       `json:"customer_name"`
+	Description  string       `json:"description"` // nama room atau nama paket
+	StoreName    string       `json:"store_name"`
+	Amount       money.Rupiah `json:"amount"`
+	Status       string       `json:"status"`
 }
 
 // SalesSummaryResponse response utama dashboard sales.

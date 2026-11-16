@@ -1,6 +1,8 @@
 package service
 
 import (
+	"game_lounge_be/money"
+
 	"testing"
 
 	"game_lounge_be/models"
@@ -98,8 +100,8 @@ func TestSplitByHappyHour_HHInMiddle(t *testing.T) {
 	if len(slots) != 3 {
 		t.Fatalf("want 3 slots, got %d: %+v", len(slots), slots)
 	}
-	checkSlot(t, slots[0], 600, 960, false)  // 10:00 - 16:00 normal
-	checkSlot(t, slots[1], 960, 1200, true)  // 16:00 - 20:00 HH
+	checkSlot(t, slots[0], 600, 960, false)   // 10:00 - 16:00 normal
+	checkSlot(t, slots[1], 960, 1200, true)   // 16:00 - 20:00 HH
 	checkSlot(t, slots[2], 1200, 1320, false) // 20:00 - 22:00 normal
 }
 
@@ -123,8 +125,8 @@ func TestSplitByHappyHour_HHAtEnd(t *testing.T) {
 	if len(slots) != 2 {
 		t.Fatalf("want 2 slots, got %d: %+v", len(slots), slots)
 	}
-	checkSlot(t, slots[0], 840, 960, false)  // 14:00-16:00 normal
-	checkSlot(t, slots[1], 960, 1200, true)  // 16:00-20:00 HH
+	checkSlot(t, slots[0], 840, 960, false) // 14:00-16:00 normal
+	checkSlot(t, slots[1], 960, 1200, true) // 16:00-20:00 HH
 }
 
 func TestSplitByHappyHour_HHOutsideSegment(t *testing.T) {
@@ -150,10 +152,10 @@ func TestSplitByHappyHour_MultipleHH(t *testing.T) {
 	if len(slots) != 5 {
 		t.Fatalf("want 5 slots, got %d: %+v", len(slots), slots)
 	}
-	checkSlot(t, slots[0], 480, 600, false)  // 08:00-10:00
-	checkSlot(t, slots[1], 600, 720, true)   // 10:00-12:00 HH
-	checkSlot(t, slots[2], 720, 960, false)  // 12:00-16:00
-	checkSlot(t, slots[3], 960, 1080, true)  // 16:00-18:00 HH
+	checkSlot(t, slots[0], 480, 600, false)   // 08:00-10:00
+	checkSlot(t, slots[1], 600, 720, true)    // 10:00-12:00 HH
+	checkSlot(t, slots[2], 720, 960, false)   // 12:00-16:00
+	checkSlot(t, slots[3], 960, 1080, true)   // 16:00-18:00 HH
 	checkSlot(t, slots[4], 1080, 1320, false) // 18:00-22:00
 }
 
@@ -171,7 +173,7 @@ func makePricing(edge2h, edge4h string) *models.StorePricing {
 	return &models.StorePricing{EdgeCase2h: edge2h, EdgeCase4h: edge4h}
 }
 
-func makePackages(durationPrices map[uint]float64) []models.StorePackagePrice {
+func makePackages(durationPrices map[uint]money.Rupiah) []models.StorePackagePrice {
 	var pkgs []models.StorePackagePrice
 	for dur, price := range durationPrices {
 		pkgs = append(pkgs, models.StorePackagePrice{DurationHours: dur, Price: price})
@@ -180,7 +182,7 @@ func makePackages(durationPrices map[uint]float64) []models.StorePackagePrice {
 }
 
 func TestFindCheapestPackage_Basic(t *testing.T) {
-	pkgs := makePackages(map[uint]float64{
+	pkgs := makePackages(map[uint]money.Rupiah{
 		1: 50000,
 		2: 90000,
 		3: 120000,
@@ -190,22 +192,22 @@ func TestFindCheapestPackage_Basic(t *testing.T) {
 	// 1 jam → Paket 1 Jam
 	price, _ := findCheapestPackage(1, pkgs, pricing)
 	if price != 50000 {
-		t.Errorf("1 jam: want 50000, got %.0f", price)
+		t.Errorf("1 jam: want 50000, got %d", price)
 	}
 
 	// 3 jam → Paket 3 Jam (120000, lebih murah dari 3× Paket 1 Jam = 150000)
 	price, _ = findCheapestPackage(3, pkgs, pricing)
 	if price != 120000 {
-		t.Errorf("3 jam: want 120000, got %.0f", price)
+		t.Errorf("3 jam: want 120000, got %d", price)
 	}
 }
 
 func TestFindCheapestPackage_EdgeCase2h_TwoX1h(t *testing.T) {
-	pkgs := makePackages(map[uint]float64{1: 50000, 3: 120000})
+	pkgs := makePackages(map[uint]money.Rupiah{1: 50000, 3: 120000})
 	pricing := makePricing("two_x_1h", "3h_plus_1h")
 	price, desc := findCheapestPackage(2, pkgs, pricing)
 	if price != 100000 {
-		t.Errorf("edge 2h two_x_1h: want 100000, got %.0f", price)
+		t.Errorf("edge 2h two_x_1h: want 100000, got %d", price)
 	}
 	if desc != "2× Paket 1 Jam" {
 		t.Errorf("desc: want '2× Paket 1 Jam', got %q", desc)
@@ -213,11 +215,11 @@ func TestFindCheapestPackage_EdgeCase2h_TwoX1h(t *testing.T) {
 }
 
 func TestFindCheapestPackage_EdgeCase2h_Force3h(t *testing.T) {
-	pkgs := makePackages(map[uint]float64{1: 50000, 3: 120000})
+	pkgs := makePackages(map[uint]money.Rupiah{1: 50000, 3: 120000})
 	pricing := makePricing("force_3h", "3h_plus_1h")
 	price, desc := findCheapestPackage(2, pkgs, pricing)
 	if price != 120000 {
-		t.Errorf("edge 2h force_3h: want 120000, got %.0f", price)
+		t.Errorf("edge 2h force_3h: want 120000, got %d", price)
 	}
 	if desc != "Paket 3 Jam" {
 		t.Errorf("desc: want 'Paket 3 Jam', got %q", desc)
@@ -225,11 +227,11 @@ func TestFindCheapestPackage_EdgeCase2h_Force3h(t *testing.T) {
 }
 
 func TestFindCheapestPackage_EdgeCase4h_3hPlus1h(t *testing.T) {
-	pkgs := makePackages(map[uint]float64{1: 50000, 3: 120000, 5: 200000})
+	pkgs := makePackages(map[uint]money.Rupiah{1: 50000, 3: 120000, 5: 200000})
 	pricing := makePricing("two_x_1h", "3h_plus_1h")
 	price, desc := findCheapestPackage(4, pkgs, pricing)
 	if price != 170000 { // 120000 + 50000
-		t.Errorf("edge 4h 3h_plus_1h: want 170000, got %.0f", price)
+		t.Errorf("edge 4h 3h_plus_1h: want 170000, got %d", price)
 	}
 	if desc != "Paket 3 Jam + Paket 1 Jam" {
 		t.Errorf("desc: want 'Paket 3 Jam + Paket 1 Jam', got %q", desc)
@@ -237,11 +239,11 @@ func TestFindCheapestPackage_EdgeCase4h_3hPlus1h(t *testing.T) {
 }
 
 func TestFindCheapestPackage_EdgeCase4h_Force5h(t *testing.T) {
-	pkgs := makePackages(map[uint]float64{1: 50000, 3: 120000, 5: 200000})
+	pkgs := makePackages(map[uint]money.Rupiah{1: 50000, 3: 120000, 5: 200000})
 	pricing := makePricing("two_x_1h", "force_5h")
 	price, desc := findCheapestPackage(4, pkgs, pricing)
 	if price != 200000 {
-		t.Errorf("edge 4h force_5h: want 200000, got %.0f", price)
+		t.Errorf("edge 4h force_5h: want 200000, got %d", price)
 	}
 	if desc != "Paket 5 Jam" {
 		t.Errorf("desc: want 'Paket 5 Jam', got %q", desc)
@@ -253,11 +255,11 @@ func TestFindCheapestPackage_GreedyOptimal(t *testing.T) {
 	// Greedy pilih 3 jam (40k/jam) → sisa 2 jam → pilih 1 jam dua kali (50k/jam)
 	// Total = 120000 + 50000 + 50000 = 220000
 	// (lebih murah dari 5× Paket 1 Jam = 250000)
-	pkgs := makePackages(map[uint]float64{1: 50000, 3: 120000})
+	pkgs := makePackages(map[uint]money.Rupiah{1: 50000, 3: 120000})
 	pricing := makePricing("two_x_1h", "3h_plus_1h")
 	price, _ := findCheapestPackage(5, pkgs, pricing)
 	if price != 220000 {
-		t.Errorf("5 jam greedy: want 220000, got %.0f", price)
+		t.Errorf("5 jam greedy: want 220000, got %d", price)
 	}
 }
 
@@ -265,24 +267,24 @@ func TestFindCheapestPackage_GreedyWith5hPackage(t *testing.T) {
 	// 5 jam dengan paket {1:50000, 3:120000, 5:200000}:
 	// Greedy: 5h (40k/jam) vs 3h (40k/jam) — 5h lebih hemat
 	// 5h = 200000
-	pkgs := makePackages(map[uint]float64{1: 50000, 3: 120000, 5: 200000})
+	pkgs := makePackages(map[uint]money.Rupiah{1: 50000, 3: 120000, 5: 200000})
 	pricing := makePricing("two_x_1h", "3h_plus_1h")
 	price, _ := findCheapestPackage(5, pkgs, pricing)
 	if price != 200000 {
-		t.Errorf("5 jam greedy with 5h pkg: want 200000, got %.0f", price)
+		t.Errorf("5 jam greedy with 5h pkg: want 200000, got %d", price)
 	}
 }
 
 // ── priceNormalSegment ────────────────────────────────────────
 
 func TestPriceNormalSegment_NoHH(t *testing.T) {
-	pkgs := makePackages(map[uint]float64{1: 50000, 3: 120000})
+	pkgs := makePackages(map[uint]money.Rupiah{1: 50000, 3: 120000})
 	pricing := makePricing("two_x_1h", "3h_plus_1h")
 
 	// 3 jam normal, tidak ada HH → Paket 3 Jam
 	price, items := priceNormalSegment(600, 780, false, pricing, pkgs, nil, nil) // 10:00-13:00
 	if price != 120000 {
-		t.Errorf("want 120000, got %.0f", price)
+		t.Errorf("want 120000, got %d", price)
 	}
 	if len(items) != 1 {
 		t.Fatalf("want 1 breakdown item, got %d", len(items))
@@ -296,7 +298,7 @@ func TestPriceNormalSegment_NoHH(t *testing.T) {
 }
 
 func TestPriceNormalSegment_WithHH_SplitMiddle(t *testing.T) {
-	pkgs := makePackages(map[uint]float64{1: 50000, 3: 120000})
+	pkgs := makePackages(map[uint]money.Rupiah{1: 50000, 3: 120000})
 	pricing := &models.StorePricing{
 		IsHappyHourEnabled: true,
 		EdgeCase2h:         "two_x_1h",
@@ -313,7 +315,7 @@ func TestPriceNormalSegment_WithHH_SplitMiddle(t *testing.T) {
 	// Normal 20-22 = 2× Paket 1 Jam = 100000
 	// Total = 320000
 	if price != 320000 {
-		t.Errorf("want 320000, got %.0f", price)
+		t.Errorf("want 320000, got %d", price)
 	}
 	if len(items) != 3 {
 		t.Fatalf("want 3 breakdown items, got %d: %+v", len(items), items)
@@ -331,7 +333,7 @@ func TestPriceNormalSegment_WithHH_SplitMiddle(t *testing.T) {
 
 func TestPriceNormalSegment_IsWeekdayFalse_IgnoresHH(t *testing.T) {
 	// Meskipun ada jadwal HH, jika isWeekday=false maka HH tidak berlaku
-	pkgs := makePackages(map[uint]float64{1: 50000, 2: 90000})
+	pkgs := makePackages(map[uint]money.Rupiah{1: 50000, 2: 90000})
 	pricing := &models.StorePricing{
 		IsHappyHourEnabled: true,
 		EdgeCase2h:         "two_x_1h", // 2 jam → 2× Paket 1 Jam
@@ -347,15 +349,15 @@ func TestPriceNormalSegment_IsWeekdayFalse_IgnoresHH(t *testing.T) {
 		t.Errorf("harus Normal Hour saat isWeekday=false, got items=%+v", items)
 	}
 	if price != 100000 {
-		t.Errorf("want 100000 (2× Paket 1 Jam via EdgeCase2h=two_x_1h), got %.0f", price)
+		t.Errorf("want 100000 (2× Paket 1 Jam via EdgeCase2h=two_x_1h), got %d", price)
 	}
 }
 
 func TestPriceNormalSegment_EmptySegment(t *testing.T) {
-	pkgs := makePackages(map[uint]float64{1: 50000})
+	pkgs := makePackages(map[uint]money.Rupiah{1: 50000})
 	pricing := makePricing("two_x_1h", "3h_plus_1h")
 	price, items := priceNormalSegment(600, 600, false, pricing, pkgs, nil, nil)
 	if price != 0 || len(items) != 0 {
-		t.Errorf("segmen kosong harus return 0, got price=%.0f items=%d", price, len(items))
+		t.Errorf("segmen kosong harus return 0, got price=%d items=%d", price, len(items))
 	}
 }

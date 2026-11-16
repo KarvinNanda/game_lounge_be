@@ -1,6 +1,8 @@
 package service
 
 import (
+	"game_lounge_be/money"
+
 	"testing"
 	"time"
 
@@ -12,7 +14,7 @@ import (
 )
 
 // newPricedStore: store acak (jam operasional fallback 10:00–02:00) dengan harga event.
-func newPricedStore(t *testing.T, pricePerDay float64) string {
+func newPricedStore(t *testing.T, pricePerDay money.Rupiah) string {
 	t.Helper()
 	storeID := uuid.NewString()
 	if err := config.DB.Create(&models.StoreEventPrice{StoreID: storeID, PricePerDay: pricePerDay}).Error; err != nil {

@@ -1,5 +1,7 @@
 package dto
 
+import "game_lounge_be/money"
+
 // ── Pricing Config ────────────────────────────────────────────
 
 type CreatePricingRequest struct {
@@ -33,8 +35,8 @@ type AddScheduleRequest struct {
 // ── Happy Hour Prices ─────────────────────────────────────────
 
 type HappyHourPriceInput struct {
-	RoomTemplateID uint    `json:"room_template_id" binding:"required"`
-	PricePerHour   float64 `json:"price_per_hour" binding:"required,min=0"`
+	RoomTemplateID uint         `json:"room_template_id" binding:"required"`
+	PricePerHour   money.Rupiah `json:"price_per_hour" binding:"required,min=0"`
 }
 
 type BulkUpsertHappyHourPricesRequest struct {
@@ -44,10 +46,10 @@ type BulkUpsertHappyHourPricesRequest struct {
 // ── Package Prices ────────────────────────────────────────────
 
 type PackagePriceInput struct {
-	RoomTemplateID uint    `json:"room_template_id" binding:"required"`
-	DurationHours  uint    `json:"duration_hours" binding:"required,min=1"`
-	Price          float64 `json:"price" binding:"required,min=0"`
-	IsCustom       bool    `json:"is_custom"`
+	RoomTemplateID uint         `json:"room_template_id" binding:"required"`
+	DurationHours  uint         `json:"duration_hours" binding:"required,min=1"`
+	Price          money.Rupiah `json:"price" binding:"required,min=0"`
+	IsCustom       bool         `json:"is_custom"`
 }
 
 type BulkUpsertPackagePricesRequest struct {
@@ -57,27 +59,27 @@ type BulkUpsertPackagePricesRequest struct {
 // ── Flash Sale ────────────────────────────────────────────────
 
 type CreateFlashSaleRequest struct {
-	RoomTemplateID uint    `json:"room_template_id" binding:"required"`
-	Name           string  `json:"name" binding:"required,min=2,max=150"`
-	Description    string  `json:"description"`
-	PricePerHour   float64 `json:"price_per_hour" binding:"required,gt=0"`
-	DateFrom       string  `json:"date_from" binding:"required"`
-	DateTo         string  `json:"date_to" binding:"required"`
-	TimeFrom       string  `json:"time_from" binding:"required"`
-	TimeTo         string  `json:"time_to" binding:"required"`
-	IsActive       *bool   `json:"is_active"`
+	RoomTemplateID uint         `json:"room_template_id" binding:"required"`
+	Name           string       `json:"name" binding:"required,min=2,max=150"`
+	Description    string       `json:"description"`
+	PricePerHour   money.Rupiah `json:"price_per_hour" binding:"required,gt=0"`
+	DateFrom       string       `json:"date_from" binding:"required"`
+	DateTo         string       `json:"date_to" binding:"required"`
+	TimeFrom       string       `json:"time_from" binding:"required"`
+	TimeTo         string       `json:"time_to" binding:"required"`
+	IsActive       *bool        `json:"is_active"`
 }
 
 type UpdateFlashSaleRequest struct {
-	RoomTemplateID uint    `json:"room_template_id" binding:"required"`
-	Name         string  `json:"name" binding:"required,min=2,max=150"`
-	Description  string  `json:"description"`
-	PricePerHour float64 `json:"price_per_hour" binding:"required,gt=0"`
-	DateFrom     string  `json:"date_from" binding:"required"`
-	DateTo       string  `json:"date_to" binding:"required"`
-	TimeFrom     string  `json:"time_from" binding:"required"`
-	TimeTo       string  `json:"time_to" binding:"required"`
-	IsActive     *bool   `json:"is_active"`
+	RoomTemplateID uint         `json:"room_template_id" binding:"required"`
+	Name           string       `json:"name" binding:"required,min=2,max=150"`
+	Description    string       `json:"description"`
+	PricePerHour   money.Rupiah `json:"price_per_hour" binding:"required,gt=0"`
+	DateFrom       string       `json:"date_from" binding:"required"`
+	DateTo         string       `json:"date_to" binding:"required"`
+	TimeFrom       string       `json:"time_from" binding:"required"`
+	TimeTo         string       `json:"time_to" binding:"required"`
+	IsActive       *bool        `json:"is_active"`
 }
 
 // ── Price Calculator ──────────────────────────────────────────
@@ -91,17 +93,17 @@ type CalculatePriceRequest struct {
 }
 
 type PriceBreakdownItem struct {
-	TimeRange   string  `json:"time_range"`
-	Type        string  `json:"type"`
-	Description string  `json:"description"`
-	Amount      float64 `json:"amount"`
+	TimeRange   string       `json:"time_range"`
+	Type        string       `json:"type"`
+	Description string       `json:"description"`
+	Amount      money.Rupiah `json:"amount"`
 }
 
 type CalculatePriceResponse struct {
 	TotalHours    float64              `json:"total_hours"`
-	BasePrice     float64              `json:"base_price"`
-	FlashDiscount float64              `json:"flash_discount"`
-	FinalPrice    float64              `json:"final_price"`
+	BasePrice     money.Rupiah         `json:"base_price"`
+	FlashDiscount money.Rupiah         `json:"flash_discount"`
+	FinalPrice    money.Rupiah         `json:"final_price"`
 	Breakdown     []PriceBreakdownItem `json:"breakdown"`
 	HasFlashSale  bool                 `json:"has_flash_sale"`
 	FlashSaleName string               `json:"flash_sale_name,omitempty"`

@@ -1,6 +1,8 @@
 package service
 
 import (
+	"game_lounge_be/money"
+
 	"strings"
 	"testing"
 	"time"
@@ -12,13 +14,13 @@ import (
 
 func TestGenerateCode_AkronimDariNama(t *testing.T) {
 	cases := []struct {
-		name           string
-		wantPrefixLen  int
+		name            string
+		wantPrefixLen   int
 		wantPrefixUpper bool
 	}{
-		{"Diskon Lebaran Spesial", 3, true},  // DLS + 4 digit
-		{"Grand Opening", 2, true},           // GO + 4 digit
-		{"Holiday Sale", 2, true},            // HS + 4 digit
+		{"Diskon Lebaran Spesial", 3, true}, // DLS + 4 digit
+		{"Grand Opening", 2, true},          // GO + 4 digit
+		{"Holiday Sale", 2, true},           // HS + 4 digit
 	}
 	for _, c := range cases {
 		code := GenerateCode(c.name)
@@ -80,9 +82,9 @@ func TestGenerateCode_Deterministic_Format(t *testing.T) {
 
 // ── calculateDiscount ─────────────────────────────────────────
 
-func floatPtr(v float64) *float64 { return &v }
+func rupiahPtr(v money.Rupiah) *money.Rupiah { return &v }
 
-func makeVoucher(discountType string, discountValue float64, maxDiscount *float64) *models.Voucher {
+func makeVoucher(discountType string, discountValue float64, maxDiscount *money.Rupiah) *models.Voucher {
 	return &models.Voucher{
 		DiscountType:  discountType,
 		DiscountValue: discountValue,
@@ -94,25 +96,25 @@ func TestCalculateDiscount_Percentage_NoMax(t *testing.T) {
 	v := makeVoucher("percentage", 20, nil) // 20%
 	got := calculateDiscount(100000, v)
 	if got != 20000 {
-		t.Errorf("20%% dari 100000: want 20000, got %.0f", got)
+		t.Errorf("20%% dari 100000: want 20000, got %d", got)
 	}
 }
 
 func TestCalculateDiscount_Percentage_WithMax(t *testing.T) {
-	v := makeVoucher("percentage", 30, floatPtr(25000)) // 30%, max 25000
+	v := makeVoucher("percentage", 30, rupiahPtr(25000)) // 30%, max 25000
 	// 30% dari 100000 = 30000, tapi dikap 25000
 	got := calculateDiscount(100000, v)
 	if got != 25000 {
-		t.Errorf("30%% dari 100000 (max 25000): want 25000, got %.0f", got)
+		t.Errorf("30%% dari 100000 (max 25000): want 25000, got %d", got)
 	}
 }
 
 func TestCalculateDiscount_Percentage_BelowMax(t *testing.T) {
-	v := makeVoucher("percentage", 10, floatPtr(50000)) // 10%, max 50000
+	v := makeVoucher("percentage", 10, rupiahPtr(50000)) // 10%, max 50000
 	// 10% dari 100000 = 10000, di bawah max → pakai 10000
 	got := calculateDiscount(100000, v)
 	if got != 10000 {
-		t.Errorf("10%% dari 100000 (max 50000): want 10000, got %.0f", got)
+		t.Errorf("10%% dari 100000 (max 50000): want 10000, got %d", got)
 	}
 }
 
@@ -120,7 +122,7 @@ func TestCalculateDiscount_Flat(t *testing.T) {
 	v := makeVoucher("flat", 50000, nil)
 	got := calculateDiscount(200000, v)
 	if got != 50000 {
-		t.Errorf("flat 50000: want 50000, got %.0f", got)
+		t.Errorf("flat 50000: want 50000, got %d", got)
 	}
 }
 
@@ -129,7 +131,7 @@ func TestCalculateDiscount_Flat_ExceedsAmount(t *testing.T) {
 	v := makeVoucher("flat", 150000, nil)
 	got := calculateDiscount(100000, v)
 	if got != 100000 {
-		t.Errorf("flat 150000 dari amount 100000: want 100000, got %.0f", got)
+		t.Errorf("flat 150000 dari amount 100000: want 100000, got %d", got)
 	}
 }
 
@@ -137,7 +139,7 @@ func TestCalculateDiscount_Percentage_100pct(t *testing.T) {
 	v := makeVoucher("percentage", 100, nil)
 	got := calculateDiscount(75000, v)
 	if got != 75000 {
-		t.Errorf("100%% dari 75000: want 75000, got %.0f", got)
+		t.Errorf("100%% dari 75000: want 75000, got %d", got)
 	}
 }
 
@@ -145,7 +147,7 @@ func TestCalculateDiscount_ZeroAmount(t *testing.T) {
 	v := makeVoucher("percentage", 50, nil)
 	got := calculateDiscount(0, v)
 	if got != 0 {
-		t.Errorf("50%% dari 0: want 0, got %.0f", got)
+		t.Errorf("50%% dari 0: want 0, got %d", got)
 	}
 }
 

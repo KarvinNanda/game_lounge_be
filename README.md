@@ -106,6 +106,9 @@ game_lounge_be/
 ├── cmd/
 │   └── main.go                   # Entry point: init DB, router, server
 │
+├── money/
+│   └── rupiah.go                 # money.Rupiah (int64 rupiah), Scan/Value, PercentOf, PerHour, DivRound
+│
 ├── config/
 │   ├── config.go                 # LoadEnv, GetEnv helper
 │   └── database.go               # GORM connection to MySQL (config.DB)
@@ -722,6 +725,21 @@ Every record has these columns:
 | `deleted_at` | Soft delete timestamp (null = active) |
 
 > **Bookings** do not use soft delete. Records are permanent because they are financial records.
+
+---
+
+## Money
+
+All amounts are whole rupiah: Go type `money.Rupiah` (int64, package `money/`). Money math never uses float64.
+
+- **DB:** columns stay `decimal(12,2)`. `Rupiah` implements `sql.Scanner`, because the MySQL driver returns them as text (`"50000.00"`). A stored value with a non-zero fraction is a scan error, not a silent rounding.
+- **JSON:** amounts are plain integers. A request with a fractional amount (`15000.5`) is rejected with 400.
+- **Rounding (half up, to whole rupiah):**
+  - Voucher percentage: `money.PercentOf` (up to 2 decimals in the percentage).
+  - Happy hour and flash sale segments: `money.PerHour(price_per_hour, minutes)`, rounded per segment.
+  - Event price: `price_per_day × minutes / 1440`, rounded to Rp 1.000.
+  - Sales `avg_per_transaction`: `money.DivRound`.
+- **Not money, still decimal:** hours (`duration_hours`, `total_hours`, `remaining_hours`), percentages, and `vouchers.discount_value` (a percentage or a rupiah amount by `discount_type`; a nominal value must be whole).
 
 ---
 

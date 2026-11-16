@@ -11,6 +11,8 @@
 package main
 
 import (
+	"game_lounge_be/money"
+
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -47,6 +49,17 @@ func randomHex(n int) string {
 
 // roundK membulatkan ke Rp 1.000 terdekat.
 func roundK(v float64) float64 { return math.Round(v/1000) * 1000 }
+
+// rp converts a seed amount (already whole rupiah) to money.Rupiah.
+func rp(v float64) money.Rupiah { return money.Rupiah(math.Round(v)) }
+
+func rpPtr(v *float64) *money.Rupiah {
+	if v == nil {
+		return nil
+	}
+	r := rp(*v)
+	return &r
+}
 
 func main() {
 	for _, p := range []string{".env", "../.env", "../../.env"} {
@@ -271,12 +284,12 @@ func seed(tx *gorm.DB, hash string) {
 	}
 	for i, s := range stores {
 		must(tx.Create(&models.StorePricing{StoreID: s.ID, IsHappyHourEnabled: true, IsMixedTimeEnabled: true, EdgeCase2h: "two_x_1h", EdgeCase4h: "3h_plus_1h", CreatedBy: a}).Error)
-		must(tx.Create(&models.StoreEventPrice{StoreID: s.ID, PricePerDay: float64(6000000 + i*500000), CreatedBy: a}).Error)
+		must(tx.Create(&models.StoreEventPrice{StoreID: s.ID, PricePerDay: rp(float64(6000000 + i*500000)), CreatedBy: a}).Error)
 		must(tx.Create(&models.StoreHappyHourSchedule{StoreID: s.ID, StartTime: "10:00", EndTime: "14:00", CreatedBy: a}).Error)
 		for _, t := range tpls {
-			must(tx.Create(&models.StoreHappyHourPrice{StoreID: s.ID, RoomTemplateID: t.ID, PricePerHour: roundK(t.Hourly * 0.7), CreatedBy: a}).Error)
+			must(tx.Create(&models.StoreHappyHourPrice{StoreID: s.ID, RoomTemplateID: t.ID, PricePerHour: rp(roundK(t.Hourly * 0.7)), CreatedBy: a}).Error)
 			for _, h := range []uint{1, 3, 5, 8, 10} {
-				must(tx.Create(&models.StorePackagePrice{StoreID: s.ID, RoomTemplateID: t.ID, DurationHours: h, Price: pkgPrice(t.Hourly, h), CreatedBy: a}).Error)
+				must(tx.Create(&models.StorePackagePrice{StoreID: s.ID, RoomTemplateID: t.ID, DurationHours: h, Price: rp(pkgPrice(t.Hourly, h)), CreatedBy: a}).Error)
 			}
 		}
 	}
@@ -301,7 +314,7 @@ func seed(tx *gorm.DB, hash string) {
 	for _, f := range flashDefs {
 		fs := models.StoreFlashSale{
 			ID: uuid.NewString(), StoreID: stores[f.store].ID, RoomTemplateID: tpls[f.tpl].ID, Name: f.name,
-			Description: ptr("Promo terbatas, harga spesial per jam."), PricePerHour: f.price,
+			Description: ptr("Promo terbatas, harga spesial per jam."), PricePerHour: rp(f.price),
 			DateFrom: day(f.from), DateTo: day(f.to), TimeFrom: f.tFrom, TimeTo: f.tTo, IsActive: f.active, CreatedBy: a,
 		}
 		must(tx.Create(&fs).Error)
@@ -400,7 +413,7 @@ func seed(tx *gorm.DB, hash string) {
 	var pkgs []models.PlayCreditsPackage
 	for i, d := range pkgDefs {
 		p := models.PlayCreditsPackage{
-			ID: uuid.NewString(), Name: d.name, TotalHours: d.hours, Price: d.price, ValidityDays: d.validity,
+			ID: uuid.NewString(), Name: d.name, TotalHours: d.hours, Price: rp(d.price), ValidityDays: d.validity,
 			Description: ptr(fmt.Sprintf("Paket %v jam bermain, berlaku %d hari sejak pembelian.", d.hours, d.validity)),
 			IsActive:    i != 5, ApplyToAllStores: d.allStore, CreatedBy: a,
 		}
@@ -468,7 +481,7 @@ func seed(tx *gorm.DB, hash string) {
 	for _, d := range vDefs {
 		v := models.Voucher{
 			ID: uuid.NewString(), Name: d.name, Code: d.code, Description: ptr("Voucher khusus member Quantum Gaming Center."),
-			Type: d.typ, DiscountType: d.dtype, DiscountValue: d.value, MaxDiscount: d.maxDisc, MinPurchase: d.minPurchase,
+			Type: d.typ, DiscountType: d.dtype, DiscountValue: d.value, MaxDiscount: rpPtr(d.maxDisc), MinPurchase: rpPtr(d.minPurchase),
 			StartDate: day(d.start), EndDate: ptr(day(d.end)), SendChannel: ptr(d.channel), TotalSent: 6,
 			IsAllStores: d.allStores, IsAllRoomTypes: d.allRooms, IsActive: d.active, CreatedBy: a,
 		}
@@ -529,7 +542,7 @@ func seed(tx *gorm.DB, hash string) {
 		b := models.Booking{
 			ID: uuid.NewString(), BookingCode: fmt.Sprintf("BK-%s-%04d", date.Format("060102"), seq),
 			StoreID: s.ID, RoomID: room.ID, BookingDate: date, StartTime: d.start, EndTime: d.end,
-			DurationHours: float64(d.hours), PriceBreakdown: ptr(string(bd)), BasePrice: base, TotalPrice: base,
+			DurationHours: float64(d.hours), PriceBreakdown: ptr(string(bd)), BasePrice: rp(base), TotalPrice: rp(base),
 			PaymentMethod: d.method, Status: d.status, CreatedBy: a,
 		}
 		if d.cust >= 0 {
@@ -546,9 +559,9 @@ func seed(tx *gorm.DB, hash string) {
 			v := vouchers[d.voucher]
 			disc := v.DiscountValue
 			if v.DiscountType == "percentage" {
-				disc = math.Min(roundK(base*v.DiscountValue/100), *v.MaxDiscount)
+				disc = math.Min(roundK(base*v.DiscountValue/100), float64(*v.MaxDiscount))
 			}
-			b.VoucherID, b.VoucherCode, b.DiscountAmount, b.TotalPrice = &v.ID, &v.Code, disc, base-disc
+			b.VoucherID, b.VoucherCode, b.DiscountAmount, b.TotalPrice = &v.ID, &v.Code, rp(disc), rp(base-disc)
 		}
 		if d.status == "cancelled" {
 			b.CancelReason, b.CancelledAt, b.CancelledBy = ptr("Customer berhalangan hadir"), ptr(date.Add(10*time.Hour)), a
@@ -562,7 +575,7 @@ func seed(tx *gorm.DB, hash string) {
 	usageDefs := []struct {
 		v, c    int
 		booking *string
-		disc    float64
+		disc    money.Rupiah
 	}{
 		{0, 1, &bookings[1].ID, bookings[1].DiscountAmount},
 		{1, 7, &bookings[7].ID, bookings[7].DiscountAmount},
@@ -590,7 +603,7 @@ func seed(tx *gorm.DB, hash string) {
 		base := pkgPrice(tpls[0].Hourly, 3)
 		must(tx.Create(&models.BookingHold{
 			ID: uuid.NewString(), CustomerID: customers[i].ID, StoreID: s.ID, RoomID: room.ID, RoomTemplateID: room.RoomTemplateID,
-			BookingDate: day(3), StartTime: "10:00", EndTime: "13:00", DurationHours: 3, BasePrice: base, TotalPrice: base,
+			BookingDate: day(3), StartTime: "10:00", EndTime: "13:00", DurationHours: 3, BasePrice: rp(base), TotalPrice: rp(base),
 			PriceBreakdown: `[{"time_range":"10:00 - 13:00","type":"Normal Hour","description":"Paket 3 Jam","amount":` + fmt.Sprint(base) + `}]`,
 			PaymentMethod:  "xendit", XenditInvoiceID: ptr("inv-mock-" + randomHex(6)), ExpiresAt: created.Add(15 * time.Minute), CreatedAt: created,
 		}).Error)
@@ -621,7 +634,7 @@ func seed(tx *gorm.DB, hash string) {
 		e := models.EventBooking{
 			ID: uuid.NewString(), StoreID: active[d.store].ID, EventName: d.name, Description: ptr("Acara privat di " + active[d.store].Name),
 			CustomerName: d.customer, CustomerWhatsapp: ptr(fmt.Sprintf("08111222%04d", i+1)), BookingDate: day(d.offset),
-			StartTime: d.start, EndTime: d.end, DurationHours: d.hours, PricePerDay: perDay, TotalPrice: total, Status: d.status,
+			StartTime: d.start, EndTime: d.end, DurationHours: d.hours, PricePerDay: rp(perDay), TotalPrice: rp(total), Status: d.status,
 			DurationType: d.durType, BookingScope: d.scope, SelectedRoomTemplateIDs: d.tplIDs, CreatedBy: a,
 		}
 		if d.status == "cancelled" {
@@ -659,7 +672,7 @@ func seed(tx *gorm.DB, hash string) {
 		}
 		var items []models.FnbItem
 		for i, d := range itemDefs {
-			it := models.FnbItem{CategoryID: fnbCatIDs[d.cat], Name: d.name, Description: ptr(d.name + " — favorit pengunjung."), Price: d.price, IsAvailable: d.avail, IsActive: true, SortOrder: i + 1, CreatedBy: a}
+			it := models.FnbItem{CategoryID: fnbCatIDs[d.cat], Name: d.name, Description: ptr(d.name + " — favorit pengunjung."), Price: rp(d.price), IsAvailable: d.avail, IsActive: true, SortOrder: i + 1, CreatedBy: a}
 			must(tx.Create(&it).Error)
 			items = append(items, it)
 		}
@@ -679,7 +692,7 @@ func seed(tx *gorm.DB, hash string) {
 			b := bookings[d.booking]
 			o := models.FnbOrder{ID: uuid.NewString(), BookingID: b.ID, CustomerID: *b.CustomerID, StoreID: b.StoreID, RoomID: b.RoomID, Status: d.status}
 			for _, l := range d.lines {
-				o.TotalAmount += items[l[0]].Price * float64(l[1])
+				o.TotalAmount += items[l[0]].Price * money.Rupiah(l[1])
 			}
 			must(tx.Create(&o).Error)
 			for _, l := range d.lines {

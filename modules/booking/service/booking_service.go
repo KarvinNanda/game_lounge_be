@@ -1,6 +1,8 @@
 package service
 
 import (
+	"game_lounge_be/money"
+
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -160,7 +162,7 @@ func CreateBooking(req dto.CreateBookingRequest, createdBy string) (*BookingWith
 
 	// basePrice = FinalPrice (sudah include flash discount jika ada)
 	basePrice := calcResult.FinalPrice
-	discountAmount := 0.0
+	var discountAmount money.Rupiah
 	var voucherID *string
 	var voucherCodeStr *string
 
@@ -340,7 +342,7 @@ func CancelBooking(id string, req dto.CancelBookingRequest, cancelledBy string) 
 	}
 	if isPaidOnline(b) {
 		// Refund Xendit belum otomatis — tandai di log untuk diproses manual.
-		log.Printf("[REFUND MANUAL] booking %s (%s) dibatalkan; dibayar online Rp %.0f", b.BookingCode, b.ID, b.TotalPrice)
+		log.Printf("[REFUND MANUAL] booking %s (%s) dibatalkan; dibayar online Rp %d", b.BookingCode, b.ID, b.TotalPrice)
 	}
 	return GetBookingByID(b.ID)
 }
@@ -469,8 +471,8 @@ func GetSessionsEndingSoon(storeID string) ([]BookingWithComputed, error) {
 }
 
 // GetAvailableCredits mengambil play credits yang tersedia untuk customer di store tertentu.
-func GetAvailableCredits(customerID, storeID,bookingDate string, durationHours float64) ([]models.CustomerPlayCredit, error) {
-	return repository.FindAvailableCreditsForBooking(customerID, storeID,bookingDate, durationHours)
+func GetAvailableCredits(customerID, storeID, bookingDate string, durationHours float64) ([]models.CustomerPlayCredit, error) {
+	return repository.FindAvailableCreditsForBooking(customerID, storeID, bookingDate, durationHours)
 }
 
 // ── Notification ──────────────────────────────────────────────────────────────
@@ -508,7 +510,7 @@ func sendBookingNotification(b *models.Booking) {
 		"jam_mulai":     startTime,
 		"jam_selesai":   endTime,
 		"durasi":        fmt.Sprintf("%.0f", b.DurationHours),
-		"total_harga":   fmt.Sprintf("%.0f", b.TotalPrice),
+		"total_harga":   fmt.Sprintf("%d", b.TotalPrice),
 	})
 	if err == nil && tmpl.IsEmailActive {
 		// Template DB tersedia — kirim via SendEmail (plain text → HTML)
@@ -522,7 +524,7 @@ func sendBookingNotification(b *models.Booking) {
 			b.BookingDate.Format("02 January 2006"),
 			startTime, endTime,
 			fmt.Sprintf("%.0f", b.DurationHours),
-			fmt.Sprintf("%.0f", b.TotalPrice),
+			fmt.Sprintf("%d", b.TotalPrice),
 		)
 		if emailErr := utils.SendHTMLEmail(*b.CustomerEmail, b.CustomerName, subject, htmlContent); emailErr != nil {
 			log.Printf("[Booking] Gagal kirim email %s: %v", b.BookingCode, emailErr)

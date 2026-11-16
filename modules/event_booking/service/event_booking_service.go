@@ -1,6 +1,8 @@
 package service
 
 import (
+	"game_lounge_be/money"
+
 	"encoding/json"
 	"errors"
 	"log"
@@ -49,10 +51,13 @@ func eventOpenMins(storeID string, date time.Time) int {
 
 // calculateTotalPrice menghitung harga proporsional.
 // Formula: round((price_per_day / 24 × duration_hours) / 1000) × 1000
-// Dibulatkan ke Rp 1.000 terdekat.
-func calculateTotalPrice(pricePerDay, durationHours float64) float64 {
-	raw := pricePerDay / 24 * durationHours
-	return math.Round(raw/1000) * 1000
+// Dibulatkan ke Rp 1.000 terdekat (half up).
+// Integer math on minutes: price_per_day × minutes / 1440, rounded to Rp 1.000.
+// Durations come from clock times, so they are whole minutes (20 minutes is
+// 0.333 hours, which tenths of an hour could not represent).
+func calculateTotalPrice(pricePerDay money.Rupiah, durationHours float64) money.Rupiah {
+	minutes := money.Rupiah(math.Round(durationHours * 60))
+	return money.DivRound(pricePerDay*minutes, 1440*1000) * 1000
 }
 
 // eventDuration memvalidasi jam lalu menghitung durasi (jam). end <= start = lewat tengah malam.
@@ -159,7 +164,7 @@ func Create(req dto.CreateEventBookingRequest, createdBy string) (*models.EventB
 		return nil, err
 	}
 
-	var totalPrice float64
+	var totalPrice money.Rupiah
 	if req.DurationType == "full_day" {
 		totalPrice = eventPrice.PricePerDay // full day = harga penuh
 	} else {
@@ -297,7 +302,7 @@ func GetEventPrice(storeID string) (*models.StoreEventPrice, error) {
 }
 
 // UpsertEventPrice menyimpan harga event untuk store.
-func UpsertEventPrice(storeID string, pricePerDay float64, updatedBy string) (*models.StoreEventPrice, error) {
+func UpsertEventPrice(storeID string, pricePerDay money.Rupiah, updatedBy string) (*models.StoreEventPrice, error) {
 	if pricePerDay < 0 {
 		return nil, errors.New("harga tidak boleh negatif")
 	}
@@ -342,7 +347,7 @@ func PreviewPrice(storeID, startTime, endTime string) (map[string]interface{}, e
 		isFullDay = false
 	}
 
-	totalPrice := 0.0
+	var totalPrice money.Rupiah
 	if isFullDay {
 		totalPrice = eventPrice.PricePerDay
 	} else {
@@ -393,7 +398,7 @@ func ConfirmCustomerPayment(invoiceID string) error {
 				return err
 			}
 			if byAdmin || regular || event {
-				log.Printf("[PAYMENT ORPHAN] event=%s invoice=%s customer=%v amount=%.0f: %v",
+				log.Printf("[PAYMENT ORPHAN] event=%s invoice=%s customer=%v amount=%d: %v",
 					e.ID, invoiceID, e.CustomerID, e.TotalPrice, ErrEventPaidButSlotTaken)
 				return ErrEventPaidButSlotTaken
 			}
@@ -408,14 +413,14 @@ func ConfirmCustomerPayment(invoiceID string) error {
 
 // EventQuote = harga event customer sebelum booking dibuat.
 type EventQuote struct {
-	StoreID       string  `json:"store_id"`
-	BookingDate   string  `json:"booking_date"`
-	StartTime     string  `json:"start_time"`
-	EndTime       string  `json:"end_time"`
-	DurationHours float64 `json:"duration_hours"`
-	PricePerDay   float64 `json:"price_per_day"`
-	TotalPrice    float64 `json:"total_price"`
-	Available     bool    `json:"available"`
+	StoreID       string       `json:"store_id"`
+	BookingDate   string       `json:"booking_date"`
+	StartTime     string       `json:"start_time"`
+	EndTime       string       `json:"end_time"`
+	DurationHours float64      `json:"duration_hours"`
+	PricePerDay   money.Rupiah `json:"price_per_day"`
+	TotalPrice    money.Rupiah `json:"total_price"`
+	Available     bool         `json:"available"`
 }
 
 // QuoteCustomerEvent menghitung harga event customer tanpa membuat booking.

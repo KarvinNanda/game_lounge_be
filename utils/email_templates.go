@@ -143,7 +143,7 @@ func SendBookingConfirmationEmail(customer models.Customer, booking *models.Book
 		booking.StartTime,
 		booking.EndTime,
 		fmt.Sprintf("%.0f jam", booking.DurationHours),
-		fmt.Sprintf("Rp %.0f", booking.TotalPrice),
+		fmt.Sprintf("Rp %d", booking.TotalPrice),
 	)
 
 	subject := fmt.Sprintf("Konfirmasi Booking %s — %s", booking.BookingCode, store.Name)

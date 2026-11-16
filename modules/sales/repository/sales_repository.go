@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"game_lounge_be/money"
+
 	"fmt"
 	"sort"
 
@@ -11,8 +13,8 @@ import (
 // ── Revenue Aggregation ───────────────────────────────────────────────────────
 
 // BookingRevenue menghitung total pendapatan dari cash booking (non-cancelled).
-func BookingRevenue(dateFrom, dateTo, storeID string) float64 {
-	var result float64
+func BookingRevenue(dateFrom, dateTo, storeID string) money.Rupiah {
+	var result money.Rupiah
 	q := config.DB.Table("bookings").
 		Select("COALESCE(SUM(total_price), 0)").
 		Where("status != 'cancelled' AND payment_method = 'cash'").
@@ -38,8 +40,8 @@ func BookingCount(dateFrom, dateTo, storeID string) int64 {
 }
 
 // CreditsRevenue menghitung total pendapatan dari penjualan play credits.
-func CreditsRevenue(dateFrom, dateTo, storeID string) float64 {
-	var result float64
+func CreditsRevenue(dateFrom, dateTo, storeID string) money.Rupiah {
+	var result money.Rupiah
 	q := config.DB.Table("customer_play_credits").
 		Select("COALESCE(SUM(payment_amount), 0)").
 		Where("customer_play_credits.deleted_at IS NULL AND payment_amount IS NOT NULL").
@@ -80,7 +82,7 @@ func RevenueByBranch(dateFrom, dateTo, storeID string) []dto.RevenueByBranch {
 	var results []struct {
 		StoreID   string
 		StoreName string
-		Revenue   float64
+		Revenue   money.Rupiah
 	}
 
 	q := config.DB.Table("bookings b").
@@ -94,7 +96,7 @@ func RevenueByBranch(dateFrom, dateTo, storeID string) []dto.RevenueByBranch {
 		Order("revenue DESC").
 		Scan(&results)
 
-	var total float64
+	var total money.Rupiah
 	for _, r := range results {
 		total += r.Revenue
 	}
@@ -103,7 +105,7 @@ func RevenueByBranch(dateFrom, dateTo, storeID string) []dto.RevenueByBranch {
 	for _, r := range results {
 		pct := 0.0
 		if total > 0 {
-			pct = r.Revenue / total * 100
+			pct = float64(r.Revenue) / float64(total) * 100
 		}
 		out = append(out, dto.RevenueByBranch{
 			StoreID:    r.StoreID,
@@ -122,7 +124,7 @@ func RevenueByRoomType(dateFrom, dateTo, storeID string) []dto.RevenueByRoomType
 	var results []struct {
 		RoomTemplateID uint
 		Name           string
-		Revenue        float64
+		Revenue        money.Rupiah
 	}
 
 	q := config.DB.Table("bookings b").
@@ -137,7 +139,7 @@ func RevenueByRoomType(dateFrom, dateTo, storeID string) []dto.RevenueByRoomType
 
 	q.Group("rt.id, rt.name").Order("revenue DESC").Scan(&results)
 
-	var total float64
+	var total money.Rupiah
 	for _, r := range results {
 		total += r.Revenue
 	}
@@ -146,7 +148,7 @@ func RevenueByRoomType(dateFrom, dateTo, storeID string) []dto.RevenueByRoomType
 	for _, r := range results {
 		pct := 0.0
 		if total > 0 {
-			pct = r.Revenue / total * 100
+			pct = float64(r.Revenue) / float64(total) * 100
 		}
 		out = append(out, dto.RevenueByRoomType{
 			RoomTemplateID: r.RoomTemplateID,
@@ -187,7 +189,7 @@ func SalesTrend(dateFrom, dateTo, storeID, granularity string) []dto.TrendPoint 
 	type trendRow struct {
 		Label   string
 		GroupBy string
-		Revenue float64
+		Revenue money.Rupiah
 	}
 	var bookingTrend []trendRow
 
@@ -222,8 +224,8 @@ func SalesTrend(dateFrom, dateTo, storeID, granularity string) []dto.TrendPoint 
 	type mergedEntry struct {
 		key   string
 		label string
-		bRev  float64
-		cRev  float64
+		bRev  money.Rupiah
+		cRev  money.Rupiah
 	}
 	entryMap := make(map[string]*mergedEntry)
 	var keys []string
@@ -289,7 +291,7 @@ func GetTransactions(dateFrom, dateTo, storeID, txType string, page, perPage int
 			CustomerName string
 			RoomName     string
 			StoreName    string
-			TotalPrice   float64
+			TotalPrice   money.Rupiah
 			Status       string
 		}
 
@@ -326,7 +328,7 @@ func GetTransactions(dateFrom, dateTo, storeID, txType string, page, perPage int
 			PurchasedAt   string
 			CustomerName  string
 			PackageName   string
-			PaymentAmount float64
+			PaymentAmount money.Rupiah
 		}
 
 		cq := config.DB.Table("customer_play_credits cpc").

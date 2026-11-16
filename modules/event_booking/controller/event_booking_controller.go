@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"game_lounge_be/money"
+
 	"net/http"
 
 	"game_lounge_be/modules/event_booking/dto"
@@ -111,7 +113,7 @@ func GetEventPrice(c *gin.Context) {
 // UpsertEventPrice menyimpan (create/update) harga event untuk store.
 func UpsertEventPrice(c *gin.Context) {
 	var req struct {
-		PricePerDay float64 `json:"price_per_day" binding:"required,min=0"`
+		PricePerDay money.Rupiah `json:"price_per_day" binding:"required,min=0"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		utils.ResponseValidationError(c, http.StatusBadRequest, "Validasi gagal", err.Error())
@@ -128,9 +130,9 @@ func UpsertEventPrice(c *gin.Context) {
 
 // PreviewPrice menghitung estimasi harga event sebelum booking dibuat.
 func PreviewPrice(c *gin.Context) {
-	storeID   := c.Query("store_id")
+	storeID := c.Query("store_id")
 	startTime := c.Query("start_time")
-	endTime   := c.Query("end_time")
+	endTime := c.Query("end_time")
 	if storeID == "" || startTime == "" || endTime == "" {
 		utils.ResponseError(c, http.StatusBadRequest, "store_id, start_time, dan end_time wajib diisi")
 		return
