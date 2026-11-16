@@ -2,6 +2,7 @@ package service
 
 import (
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"errors"
 	"fmt"
@@ -136,7 +137,7 @@ func CreateStore(req dto.CreateStoreRequest, createdBy string) (*models.Store, e
 	}
 
 	// Validate rooms before inserting anything, so a rejected request creates no store.
-	newRooms, err := planRoomAdditions(store.ID, req.Rooms, createdBy)
+	newRooms, err := planRoomAdditions(config.DB, store.ID, req.Rooms, createdBy)
 	if err != nil {
 		return nil, err
 	}
@@ -203,12 +204,6 @@ func UpdateStore(id string, req dto.UpdateStoreRequest, updatedBy string) (*mode
 		return nil, errors.New("store tidak ditemukan")
 	}
 
-	// Validate rooms before changing anything, so a rejected request has no side effects.
-	newRooms, err := planRoomAdditions(id, req.Rooms, updatedBy)
-	if err != nil {
-		return nil, err
-	}
-
 	whatsapp := req.Whatsapp
 	postal := req.PostalCode
 	desc := req.Description
@@ -230,6 +225,18 @@ func UpdateStore(id string, req dto.UpdateStoreRequest, updatedBy string) (*mode
 
 	// Every write below commits together or not at all.
 	err = config.DB.Transaction(func(tx *gorm.DB) error {
+		// Lock the store row, then count units: a second save of the same form
+		// waits here and sees the units the first one added (no duplicates).
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Select("id").First(&models.Store{}, "id = ?", id).Error; err != nil {
+			return errors.New("store tidak ditemukan")
+		}
+		// Validated before any write, so a rejected request has no side effects.
+		newRooms, err := planRoomAdditions(tx, id, req.Rooms, updatedBy)
+		if err != nil {
+			return err
+		}
+
 		if err := repository.UpdateStore(tx, store); err != nil {
 			return errors.New("gagal update store")
 		}
@@ -302,7 +309,7 @@ func roomErr(format string, args ...any) error {
 // holds and FnB orders point at store_rooms.id. To take a unit out of service,
 // deactivate it with PATCH /admin/store-rooms/:id/toggle.
 // The target is a count, so sending the same request twice creates nothing new.
-func planRoomAdditions(storeID string, setups []dto.RoomSetupInput, actor string) ([]models.StoreRoom, error) {
+func planRoomAdditions(db *gorm.DB, storeID string, setups []dto.RoomSetupInput, actor string) ([]models.StoreRoom, error) {
 	var out []models.StoreRoom
 	seen := map[uint]bool{}
 	for _, s := range setups {
@@ -315,12 +322,12 @@ func planRoomAdditions(storeID string, setups []dto.RoomSetupInput, actor string
 		seen[s.RoomTemplateID] = true
 
 		var tmpl models.RoomTemplate
-		if err := config.DB.First(&tmpl, s.RoomTemplateID).Error; err != nil {
+		if err := db.First(&tmpl, s.RoomTemplateID).Error; err != nil {
 			return nil, roomErr("room template %d tidak ditemukan", s.RoomTemplateID)
 		}
 
 		var current int64
-		if err := config.DB.Model(&models.StoreRoom{}).
+		if err := db.Model(&models.StoreRoom{}).
 			Where("store_id = ? AND room_template_id = ? AND deleted_at IS NULL", storeID, s.RoomTemplateID).
 			Count(&current).Error; err != nil {
 			return nil, err
@@ -338,7 +345,7 @@ func planRoomAdditions(storeID string, setups []dto.RoomSetupInput, actor string
 		// Number after the highest unit ever used for this template (including
 		// soft-deleted rows), so a unit number is never reused.
 		var maxUnit uint
-		if err := config.DB.Model(&models.StoreRoom{}).
+		if err := db.Model(&models.StoreRoom{}).
 			Where("store_id = ? AND room_template_id = ?", storeID, s.RoomTemplateID).
 			Select("COALESCE(MAX(unit_number), 0)").Scan(&maxUnit).Error; err != nil {
 			return nil, err
