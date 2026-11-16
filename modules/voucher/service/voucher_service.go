@@ -397,7 +397,7 @@ func ValidateVoucher(req dto.ValidateVoucherRequest) (*dto.ValidateVoucherRespon
 	if voucher.MinPurchase != nil && req.Amount < *voucher.MinPurchase {
 		return &dto.ValidateVoucherResponse{
 			IsValid: false,
-			Message: fmt.Sprintf("Minimum pembelian Rp %d", *voucher.MinPurchase),
+			Message: "Minimum pembelian " + money.Format(*voucher.MinPurchase),
 		}, nil
 	}
 

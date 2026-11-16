@@ -6,6 +6,7 @@ import (
 	"log"
 
 	"game_lounge_be/models"
+	"game_lounge_be/money"
 )
 
 // BuildBookingEmailHTML membuat HTML email konfirmasi booking yang menarik.
@@ -143,7 +144,7 @@ func SendBookingConfirmationEmail(customer models.Customer, booking *models.Book
 		booking.StartTime,
 		booking.EndTime,
 		fmt.Sprintf("%.0f jam", booking.DurationHours),
-		fmt.Sprintf("Rp %d", booking.TotalPrice),
+		money.Thousands(booking.TotalPrice), // the template prints "Rp %s"
 	)
 
 	subject := fmt.Sprintf("Konfirmasi Booking %s — %s", booking.BookingCode, store.Name)

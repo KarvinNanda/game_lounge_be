@@ -510,7 +510,7 @@ func sendBookingNotification(b *models.Booking) {
 		"jam_mulai":     startTime,
 		"jam_selesai":   endTime,
 		"durasi":        fmt.Sprintf("%.0f", b.DurationHours),
-		"total_harga":   fmt.Sprintf("%d", b.TotalPrice),
+		"total_harga":   money.Thousands(b.TotalPrice),
 	})
 	if err == nil && tmpl.IsEmailActive {
 		// Template DB tersedia — kirim via SendEmail (plain text → HTML)
@@ -524,7 +524,7 @@ func sendBookingNotification(b *models.Booking) {
 			b.BookingDate.Format("02 January 2006"),
 			startTime, endTime,
 			fmt.Sprintf("%.0f", b.DurationHours),
-			fmt.Sprintf("%d", b.TotalPrice),
+			money.Thousands(b.TotalPrice),
 		)
 		if emailErr := utils.SendHTMLEmail(*b.CustomerEmail, b.CustomerName, subject, htmlContent); emailErr != nil {
 			log.Printf("[Booking] Gagal kirim email %s: %v", b.BookingCode, emailErr)
