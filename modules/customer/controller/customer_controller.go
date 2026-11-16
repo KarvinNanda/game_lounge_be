@@ -109,12 +109,12 @@ func Delete(c *gin.Context) {
 	utils.ResponseSuccess(c, http.StatusOK, "Customer berhasil dihapus", nil)
 }
 
-// ResendPassword generate ulang password dan kirim via email.
+// ResendPassword sends the customer a new one-time set-password link by email.
 func ResendPassword(c *gin.Context) {
 	id := c.Param("id")
 	if err := service.ResendPassword(id); err != nil {
 		utils.ResponseError(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	utils.ResponseSuccess(c, http.StatusOK, "Password berhasil dikirim ulang ke email customer", nil)
+	utils.ResponseSuccess(c, http.StatusOK, "Link atur password berhasil dikirim ulang ke email customer", nil)
 }

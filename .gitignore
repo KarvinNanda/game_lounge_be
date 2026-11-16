@@ -4,15 +4,20 @@
 !.env.example
 
 # Binary / build output
+/main
 /cmd/game_lounge_be
 /cmd/game_lounge_be.exe
 *.exe
 *.out
 *.test
 
-# Uploaded files (runtime-generated)
+# Uploaded files (runtime-generated). The server runs from cmd/ in local dev,
+# so uploads land in cmd/assets and cmd/uploads too. Seed images that are
+# already tracked stay tracked; only new uploads are ignored.
 /assets/
 /uploads/
+/cmd/assets/
+/cmd/uploads/
 
 # Go workspace
 go.work

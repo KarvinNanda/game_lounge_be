@@ -54,12 +54,20 @@ func Create(c *gin.Context) {
 	}
 
 	staff, err := service.CreateStaff(req, actorFrom(c))
+	if errors.Is(err, service.ErrInviteNotSent) {
+		utils.ResponseSuccess(c, http.StatusCreated, err.Error()+". Gunakan Reset Password untuk mengirim link baru.", staff)
+		return
+	}
 	if err != nil {
 		utils.ResponseError(c, statusFor(err), err.Error())
 		return
 	}
 
-	utils.ResponseSuccess(c, http.StatusCreated, "Staff berhasil dibuat", staff)
+	msg := "Staff berhasil dibuat"
+	if req.Password == "" {
+		msg = "Staff berhasil dibuat, link atur password dikirim ke " + staff.Email
+	}
+	utils.ResponseSuccess(c, http.StatusCreated, msg, staff)
 }
 
 func Update(c *gin.Context) {
@@ -110,7 +118,7 @@ func ResetPassword(c *gin.Context) {
 		utils.ResponseError(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	utils.ResponseSuccess(c, http.StatusOK, "Password berhasil direset dan dikirim ke email staff", result)
+	utils.ResponseSuccess(c, http.StatusOK, "Password lama dinonaktifkan, link atur password dikirim ke email staff", result)
 }
 
 func actorFrom(c *gin.Context) service.Actor {

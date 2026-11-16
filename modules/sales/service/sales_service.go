@@ -1,6 +1,8 @@
 package service
 
 import (
+	"game_lounge_be/money"
+
 	"math"
 	"time"
 
@@ -114,10 +116,7 @@ func GetSalesSummary(filter dto.SalesFilter) (*dto.SalesSummaryResponse, error) 
 
 	totalRev := bRev + cRev
 	totalTx := bCount + cCount
-	avgTx := 0.0
-	if totalTx > 0 {
-		avgTx = totalRev / float64(totalTx)
-	}
+	avgTx := money.DivRound(totalRev, totalTx) // whole rupiah, half up
 
 	stats := dto.SalesStats{
 		TotalRevenue:      totalRev,
@@ -135,16 +134,13 @@ func GetSalesSummary(filter dto.SalesFilter) (*dto.SalesSummaryResponse, error) 
 		pCCount := repository.CreditsCount(prevFrom, prevTo, filter.StoreID)
 		pTotalRev := pBRev + pCRev
 		pTotalTx := pBCount + pCCount
-		pAvg := 0.0
-		if pTotalTx > 0 {
-			pAvg = pTotalRev / float64(pTotalTx)
-		}
+		pAvg := money.DivRound(pTotalRev, pTotalTx)
 
-		stats.TotalRevenueChange = changePercent(totalRev, pTotalRev)
-		stats.BookingRevenueChange = changePercent(bRev, pBRev)
-		stats.CreditsRevenueChange = changePercent(cRev, pCRev)
+		stats.TotalRevenueChange = changePercent(float64(totalRev), float64(pTotalRev))
+		stats.BookingRevenueChange = changePercent(float64(bRev), float64(pBRev))
+		stats.CreditsRevenueChange = changePercent(float64(cRev), float64(pCRev))
 		stats.TransactionsChange = changePercentInt(totalTx, pTotalTx)
-		stats.AvgChange = changePercent(avgTx, pAvg)
+		stats.AvgChange = changePercent(float64(avgTx), float64(pAvg))
 	}
 
 	// Revenue by type
@@ -153,13 +149,13 @@ func GetSalesSummary(filter dto.SalesFilter) (*dto.SalesSummaryResponse, error) 
 			Type:       "booking",
 			Label:      "Booking",
 			Revenue:    bRev,
-			Percentage: pct1dp(bRev, totalRev),
+			Percentage: pct1dp(float64(bRev), float64(totalRev)),
 		},
 		{
 			Type:       "play_credits",
 			Label:      "Play Credits",
 			Revenue:    cRev,
-			Percentage: pct1dp(cRev, totalRev),
+			Percentage: pct1dp(float64(cRev), float64(totalRev)),
 		},
 	}
 

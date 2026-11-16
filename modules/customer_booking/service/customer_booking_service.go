@@ -1,11 +1,12 @@
 package service
 
 import (
+	"game_lounge_be/money"
+
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
-	"math"
 	"os"
 	"strings"
 	"time"
@@ -49,11 +50,11 @@ func GetAvailability(storeID string, roomTemplateID uint, date string, durationH
 
 	// Hitung harga proper untuk setiap slot menggunakan pricing service
 	type SlotWithPrice struct {
-		StartTime string  `json:"start_time"`
-		EndTime   string  `json:"end_time"`
-		Available bool    `json:"available"`
-		Price     float64 `json:"price"`     // harga aktual setelah kalkulasi
-		Breakdown string  `json:"breakdown"` // deskripsi breakdown harga
+		StartTime string       `json:"start_time"`
+		EndTime   string       `json:"end_time"`
+		Available bool         `json:"available"`
+		Price     money.Rupiah `json:"price"`     // harga aktual setelah kalkulasi
+		Breakdown string       `json:"breakdown"` // deskripsi breakdown harga
 	}
 
 	var slotsWithPrice []SlotWithPrice
@@ -107,7 +108,7 @@ func InitiateBooking(req InitiateBookingRequest, customerID string) (map[string]
 
 	// 4. Aplikasikan voucher jika ada — validasi lengkap yang sama dengan admin
 	// (tanggal, tipe, store, room type, minimum, member, 1x per customer).
-	discountAmount := 0.0
+	var discountAmount money.Rupiah
 	voucherCode := ""
 	var reservation *models.VoucherUsage
 	if req.VoucherID != "" {
@@ -129,7 +130,7 @@ func InitiateBooking(req InitiateBookingRequest, customerID string) (map[string]
 		if !check.IsValid {
 			return nil, errors.New(check.Message)
 		}
-		discountAmount = math.Round(check.DiscountAmount) // IDR tanpa desimal
+		discountAmount = check.DiscountAmount
 		voucherCode = voucher.Code
 		reservation = &models.VoucherUsage{
 			VoucherID:      voucher.ID,
@@ -137,7 +138,7 @@ func InitiateBooking(req InitiateBookingRequest, customerID string) (map[string]
 			DiscountAmount: discountAmount,
 		}
 	}
-	finalPrice := math.Round(totalPrice - discountAmount)
+	finalPrice := totalPrice - discountAmount
 
 	// Buat breakdown string untuk disimpan di hold
 	breakdownBytes, _ := json.Marshal(map[string]any{
@@ -160,8 +161,8 @@ func InitiateBooking(req InitiateBookingRequest, customerID string) (map[string]
 		StartTime:      startTime,
 		EndTime:        endTime,
 		DurationHours:  durationHours,
-		BasePrice:      totalPrice,   // harga sebelum diskon
-		TotalPrice:     finalPrice,   // harga setelah diskon
+		BasePrice:      totalPrice, // harga sebelum diskon
+		TotalPrice:     finalPrice, // harga setelah diskon
 		PriceBreakdown: breakdownJSON,
 		PaymentMethod:  req.PaymentMethod,
 	}
@@ -172,7 +173,7 @@ func InitiateBooking(req InitiateBookingRequest, customerID string) (map[string]
 	}
 
 	// 7. Buat Xendit invoice
-	appURL     := os.Getenv("APP_URL")
+	appURL := os.Getenv("APP_URL")
 	externalID := fmt.Sprintf("BK-%s-%s", customerID[:8], createdHold.ID[:8])
 	payerEmail := ""
 	if customer.Email != nil {
@@ -183,10 +184,10 @@ func InitiateBooking(req InitiateBookingRequest, customerID string) (map[string]
 		ExternalID:      externalID,
 		Amount:          finalPrice,
 		InvoiceDuration: int(repository.HoldDuration.Seconds()),
-		PayerEmail:  payerEmail,
-		Description: fmt.Sprintf("Booking %s — %s %s", createdHold.RoomID, req.BookingDate, startTime),
-		SuccessURL:  fmt.Sprintf("%s/payment/success?hold_id=%s", appURL, createdHold.ID),
-		FailureURL:  fmt.Sprintf("%s/payment/failed?hold_id=%s", appURL, createdHold.ID),
+		PayerEmail:      payerEmail,
+		Description:     fmt.Sprintf("Booking %s — %s %s", createdHold.RoomID, req.BookingDate, startTime),
+		SuccessURL:      fmt.Sprintf("%s/payment/success?hold_id=%s", appURL, createdHold.ID),
+		FailureURL:      fmt.Sprintf("%s/payment/failed?hold_id=%s", appURL, createdHold.ID),
 	})
 	if err != nil {
 		if relErr := repository.ReleaseHold(createdHold); relErr != nil {
@@ -196,7 +197,7 @@ func InitiateBooking(req InitiateBookingRequest, customerID string) (map[string]
 	}
 
 	// 8. Simpan invoice info ke hold
-	createdHold.XenditInvoiceID  = &invoice.ID
+	createdHold.XenditInvoiceID = &invoice.ID
 	createdHold.XenditInvoiceURL = &invoice.InvoiceURL
 	repository.UpdateHold(createdHold)
 
@@ -298,7 +299,7 @@ func QuoteBooking(storeID string, roomTemplateID uint, bookingDate string, selec
 		"available":        q.Available,
 		"base_price":       q.Price.BasePrice,
 		"flash_discount":   q.Price.FlashDiscount,
-		"total_price":      math.Round(q.Price.FinalPrice),
+		"total_price":      q.Price.FinalPrice,
 		"has_flash_sale":   q.Price.HasFlashSale,
 		"flash_sale_name":  q.Price.FlashSaleName,
 		"breakdown":        q.Price.Breakdown, // paket / happy hour / flash sale yang dipakai
@@ -334,7 +335,7 @@ func ConfirmBookingFromWebhook(xenditInvoiceID, paymentMethod string) error {
 			return err
 		}
 		if taken {
-			log.Printf("[PAYMENT ORPHAN] invoice=%s hold=%s customer=%s amount=%.0f: %v",
+			log.Printf("[PAYMENT ORPHAN] invoice=%s hold=%s customer=%s amount=%d: %v",
 				xenditInvoiceID, hold.ID, hold.CustomerID, hold.TotalPrice, ErrPaidButSlotTaken)
 			return ErrPaidButSlotTaken
 		}
@@ -414,7 +415,7 @@ func holdVoucher(priceBreakdown string) holdVoucherInfo {
 // Jika reservasi sudah hilang (mis. hold dibersihkan sebelum webhook datang),
 // usage dibuat ulang; bila UNIQUE menolak, booking tetap dibuat karena customer
 // sudah membayar harga diskon — kejadian ini dicatat di log.
-func markVoucherUsed(tx *gorm.DB, voucherID, customerID, bookingID string, discount float64) error {
+func markVoucherUsed(tx *gorm.DB, voucherID, customerID, bookingID string, discount money.Rupiah) error {
 	if voucherID == "" {
 		return nil
 	}
@@ -472,7 +473,6 @@ func getPriceForSlot(storeID string, roomTemplateID uint, date, startTime, endTi
 		EndTime:        endTime,
 	})
 }
-
 
 // HoldStatus = status pembayaran sebuah hold untuk halaman payment success.
 type HoldStatus struct {

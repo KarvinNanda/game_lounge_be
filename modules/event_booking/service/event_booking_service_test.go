@@ -1,6 +1,8 @@
 package service
 
 import (
+	"game_lounge_be/money"
+
 	"testing"
 	"time"
 
@@ -12,54 +14,54 @@ import (
 func TestCalculateTotalPrice_Proporsional(t *testing.T) {
 	// 1.000.000 / hari → per jam = 41.666,67 → 4 jam = 166.666,67 → dibulatkan ke 167.000
 	got := calculateTotalPrice(1_000_000, 4)
-	want := 167_000.0
+	want := money.Rupiah(167_000)
 	if got != want {
-		t.Errorf("calculateTotalPrice(1000000, 4) = %.0f, want %.0f", got, want)
+		t.Errorf("calculateTotalPrice(1000000, 4) = %d, want %d", got, want)
 	}
 }
 
 func TestCalculateTotalPrice_SebuahHari(t *testing.T) {
 	// 1 hari penuh (24 jam) → total = price_per_day itu sendiri
 	got := calculateTotalPrice(2_400_000, 24)
-	want := 2_400_000.0
+	want := money.Rupiah(2_400_000)
 	if got != want {
-		t.Errorf("calculateTotalPrice(2400000, 24) = %.0f, want %.0f", got, want)
+		t.Errorf("calculateTotalPrice(2400000, 24) = %d, want %d", got, want)
 	}
 }
 
 func TestCalculateTotalPrice_SetengahHari(t *testing.T) {
 	// 2.400.000 / hari, 12 jam = 1.200.000
 	got := calculateTotalPrice(2_400_000, 12)
-	want := 1_200_000.0
+	want := money.Rupiah(1_200_000)
 	if got != want {
-		t.Errorf("calculateTotalPrice(2400000, 12) = %.0f, want %.0f", got, want)
+		t.Errorf("calculateTotalPrice(2400000, 12) = %d, want %d", got, want)
 	}
 }
 
 func TestCalculateTotalPrice_DibulatkanKeRibuanBawah(t *testing.T) {
 	// 500.000 / hari, 1 jam = 20.833,33 → dibulatkan ke 21.000
 	got := calculateTotalPrice(500_000, 1)
-	want := 21_000.0
+	want := money.Rupiah(21_000)
 	if got != want {
-		t.Errorf("calculateTotalPrice(500000, 1) = %.0f, want %.0f", got, want)
+		t.Errorf("calculateTotalPrice(500000, 1) = %d, want %d", got, want)
 	}
 }
 
 func TestCalculateTotalPrice_DibulatkanKeRibuanAtas(t *testing.T) {
 	// 720.000 / hari, 1 jam = 30.000 tepat → tidak ada pembulatan
 	got := calculateTotalPrice(720_000, 1)
-	want := 30_000.0
+	want := money.Rupiah(30_000)
 	if got != want {
-		t.Errorf("calculateTotalPrice(720000, 1) = %.0f, want %.0f", got, want)
+		t.Errorf("calculateTotalPrice(720000, 1) = %d, want %d", got, want)
 	}
 }
 
 func TestCalculateTotalPrice_DurasiPecahan(t *testing.T) {
 	// 2.400.000 / hari, 1.5 jam = 150.000
 	got := calculateTotalPrice(2_400_000, 1.5)
-	want := 150_000.0
+	want := money.Rupiah(150_000)
 	if got != want {
-		t.Errorf("calculateTotalPrice(2400000, 1.5) = %.0f, want %.0f", got, want)
+		t.Errorf("calculateTotalPrice(2400000, 1.5) = %d, want %d", got, want)
 	}
 }
 

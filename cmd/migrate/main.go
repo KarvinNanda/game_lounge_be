@@ -109,6 +109,9 @@ func main() {
 		log.Fatalf("Gagal seed booking_sequences: %v", err)
 	}
 
+	upgradeWelcomeTemplate(db)
+	softDeleteRoomsOfDeletedStores(db)
+
 	seedSuperAdmin(db)
 
 	log.Println("Migrasi selesai")

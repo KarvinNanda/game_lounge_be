@@ -36,7 +36,7 @@ func TestCalculatePrice_NormalHoursWeekend(t *testing.T) {
 		t.Fatalf("CalculatePrice error: %v", err)
 	}
 	if resp.BasePrice != 120000 {
-		t.Errorf("base_price: want 120000, got %.0f", resp.BasePrice)
+		t.Errorf("base_price: want 120000, got %d", resp.BasePrice)
 	}
 	if resp.TotalHours != 3 {
 		t.Errorf("total_hours: want 3, got %.1f", resp.TotalHours)
@@ -64,7 +64,7 @@ func TestCalculatePrice_NormalHoursWeekdayBeforeHH(t *testing.T) {
 		t.Fatalf("CalculatePrice error: %v", err)
 	}
 	if resp.BasePrice != 120000 {
-		t.Errorf("base_price: want 120000, got %.0f", resp.BasePrice)
+		t.Errorf("base_price: want 120000, got %d", resp.BasePrice)
 	}
 }
 
@@ -86,7 +86,7 @@ func TestCalculatePrice_WithHappyHour(t *testing.T) {
 		t.Fatalf("CalculatePrice error: %v", err)
 	}
 	if resp.BasePrice != 220000 {
-		t.Errorf("base_price: want 220000, got %.0f", resp.BasePrice)
+		t.Errorf("base_price: want 220000, got %d", resp.BasePrice)
 	}
 	if len(resp.Breakdown) != 2 {
 		t.Fatalf("want 2 breakdown items (Normal + HH), got %d: %+v", len(resp.Breakdown), resp.Breakdown)
@@ -137,7 +137,7 @@ func TestCalculatePrice_FlashSaleAtEnd(t *testing.T) {
 		t.Fatalf("CalculatePrice error: %v", err)
 	}
 	if resp.BasePrice != 200000 {
-		t.Errorf("base_price: want 200000, got %.0f", resp.BasePrice)
+		t.Errorf("base_price: want 200000, got %d", resp.BasePrice)
 	}
 	if !resp.HasFlashSale {
 		t.Error("has_flash_sale harus true")
@@ -191,7 +191,7 @@ func TestCalculatePrice_FlashSaleAtStart(t *testing.T) {
 		t.Fatalf("CalculatePrice error: %v", err)
 	}
 	if resp.BasePrice != 230000 {
-		t.Errorf("base_price: want 230000, got %.0f", resp.BasePrice)
+		t.Errorf("base_price: want 230000, got %d", resp.BasePrice)
 	}
 	if !resp.HasFlashSale {
 		t.Error("has_flash_sale harus true")

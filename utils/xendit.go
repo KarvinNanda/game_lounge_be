@@ -1,6 +1,8 @@
 package utils
 
 import (
+	"game_lounge_be/money"
+
 	"bytes"
 	"crypto/subtle"
 	"encoding/json"
@@ -11,12 +13,12 @@ import (
 )
 
 type XenditInvoiceRequest struct {
-	ExternalID  string  `json:"external_id"`
-	Amount      float64 `json:"amount"`
-	PayerEmail  string  `json:"payer_email"`
-	Description string  `json:"description"`
-	SuccessURL  string  `json:"success_redirect_url"`
-	FailureURL  string  `json:"failure_redirect_url"`
+	ExternalID  string       `json:"external_id"`
+	Amount      money.Rupiah `json:"amount"`
+	PayerEmail  string       `json:"payer_email"`
+	Description string       `json:"description"`
+	SuccessURL  string       `json:"success_redirect_url"`
+	FailureURL  string       `json:"failure_redirect_url"`
 	// InvoiceDuration (detik). Tanpa ini Xendit memakai default 24 jam, sehingga
 	// customer bisa membayar setelah hold/intent di sisi kita sudah habis.
 	InvoiceDuration int `json:"invoice_duration,omitempty"`
@@ -34,7 +36,7 @@ func CreateXenditInvoice(req XenditInvoiceRequest) (*XenditInvoiceResponse, erro
 	// ── MOCK MODE (dev tanpa API key) ────────────────────────────────────────
 	if XenditMockMode() {
 		mockID := fmt.Sprintf("mock-invoice-%s-%d", req.ExternalID, time.Now().Unix())
-		mockURL := fmt.Sprintf("%s/payment/mock?invoice_id=%s&amount=%.0f",
+		mockURL := fmt.Sprintf("%s/payment/mock?invoice_id=%s&amount=%d",
 			os.Getenv("APP_URL"), mockID, req.Amount)
 		return &XenditInvoiceResponse{
 			ID:         mockID,

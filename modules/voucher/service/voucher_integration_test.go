@@ -34,7 +34,7 @@ func TestValidateVoucher_Valid(t *testing.T) {
 	}
 	// 20% dari 100000 = 20000
 	if resp.DiscountAmount != 20000 {
-		t.Errorf("discount: want 20000, got %.0f", resp.DiscountAmount)
+		t.Errorf("discount: want 20000, got %d", resp.DiscountAmount)
 	}
 }
 
@@ -224,7 +224,7 @@ func TestValidateVoucher_NominalDiscount(t *testing.T) {
 		t.Fatalf("harus valid: %q", resp.Message)
 	}
 	if resp.DiscountAmount != 50000 {
-		t.Errorf("discount nominal: want 50000, got %.0f", resp.DiscountAmount)
+		t.Errorf("discount nominal: want 50000, got %d", resp.DiscountAmount)
 	}
 }
 

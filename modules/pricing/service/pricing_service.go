@@ -1,6 +1,8 @@
 package service
 
 import (
+	"game_lounge_be/money"
+
 	"errors"
 	"fmt"
 	"math"
@@ -9,9 +11,9 @@ import (
 	"time"
 
 	"game_lounge_be/models"
+	globalHolidayRepo "game_lounge_be/modules/global_holiday/repository"
 	"game_lounge_be/modules/pricing/dto"
 	"game_lounge_be/modules/pricing/repository"
-	globalHolidayRepo "game_lounge_be/modules/global_holiday/repository"
 	"game_lounge_be/utils"
 
 	"github.com/google/uuid"
@@ -321,10 +323,12 @@ func DeleteFlashSale(id string, deletedBy string) error {
 // CalculatePrice menghitung harga booking berdasarkan semua aturan pricing.
 //
 // Pendekatan: timeline dibagi menjadi segmen kronologis:
-//   [sebelum FS] → [flash sale] → [sesudah FS]
+//
+//	[sebelum FS] → [flash sale] → [sesudah FS]
 //
 // Segmen non-flash kemudian di-split lagi berdasarkan jadwal happy hour:
-//   [normal] → [happy hour] → [normal] → ...
+//
+//	[normal] → [happy hour] → [normal] → ...
 //
 // Ini memastikan: flash sale di akhir booking → jam awal dihitung normal dulu,
 // flash sale di awal → dihitung flash dulu baru normal, dll.
@@ -389,7 +393,7 @@ func CalculatePrice(req dto.CalculatePriceRequest) (*dto.CalculatePriceResponse,
 
 	// ── Bangun segmen kronologis & hitung harga ───────────────
 	var breakdown []dto.PriceBreakdownItem
-	var basePrice float64
+	var basePrice money.Rupiah
 
 	if hasFlash {
 		// ① Sebelum flash sale → normal/HH
@@ -401,12 +405,12 @@ func CalculatePrice(req dto.CalculatePriceRequest) (*dto.CalculatePriceResponse,
 
 		// ② Flash sale window
 		fsHours := float64(fsOverlapEnd-fsOverlapStart) / 60.0
-		fsTotal := fsHours * flashSale.PricePerHour
+		fsTotal := money.PerHour(flashSale.PricePerHour, fsOverlapEnd-fsOverlapStart)
 		basePrice += fsTotal
 		breakdown = append(breakdown, dto.PriceBreakdownItem{
 			TimeRange:   fmt.Sprintf("%s - %s", utils.MinsToClock(fsOverlapStart), utils.MinsToClock(fsOverlapEnd)),
 			Type:        "Flash Sale",
-			Description: fmt.Sprintf("%s — %s Jam × Rp %.0f", flashSale.Name, formatHours(fsHours), flashSale.PricePerHour),
+			Description: fmt.Sprintf("%s — %s Jam × Rp %d", flashSale.Name, formatHours(fsHours), flashSale.PricePerHour),
 			Amount:      fsTotal,
 		})
 
@@ -495,14 +499,14 @@ func priceNormalSegment(
 	packages []models.StorePackagePrice,
 	schedules []models.StoreHappyHourSchedule,
 	hhPrice *models.StoreHappyHourPrice,
-) (float64, []dto.PriceBreakdownItem) {
+) (money.Rupiah, []dto.PriceBreakdownItem) {
 	segMins := segEnd - segStart
 	if segMins <= 0 {
 		return 0, nil
 	}
 
 	var items []dto.PriceBreakdownItem
-	var totalPrice float64
+	var totalPrice money.Rupiah
 
 	useHH := isWeekday && pricing.IsHappyHourEnabled && hhPrice != nil
 
@@ -526,12 +530,12 @@ func priceNormalSegment(
 		}
 		if slot.IsHH {
 			hhHours := float64(slotMins) / 60.0
-			hhTotal := hhHours * hhPrice.PricePerHour
+			hhTotal := money.PerHour(hhPrice.PricePerHour, slotMins)
 			totalPrice += hhTotal
 			items = append(items, dto.PriceBreakdownItem{
 				TimeRange:   fmt.Sprintf("%s - %s", utils.MinsToClock(slot.Start), utils.MinsToClock(slot.End)),
 				Type:        "Happy Hour",
-				Description: fmt.Sprintf("%s Jam × Rp %.0f", formatHours(hhHours), hhPrice.PricePerHour),
+				Description: fmt.Sprintf("%s Jam × Rp %d", formatHours(hhHours), hhPrice.PricePerHour),
 				Amount:      hhTotal,
 			})
 		} else {
@@ -579,7 +583,7 @@ func formatHours(h float64) string {
 }
 
 // findCheapestPackage mencari kombinasi paket termurah untuk n jam Normal Hour.
-func findCheapestPackage(hours int, packages []models.StorePackagePrice, pricing *models.StorePricing) (float64, string) {
+func findCheapestPackage(hours int, packages []models.StorePackagePrice, pricing *models.StorePricing) (money.Rupiah, string) {
 	// Edge case 2 jam
 	if hours == 2 {
 		switch pricing.EdgeCase2h {
@@ -614,7 +618,7 @@ func findCheapestPackage(hours int, packages []models.StorePackagePrice, pricing
 }
 
 // dpCheapestCombination cari kombinasi paket termurah secara greedy (harga per jam terbaik).
-func dpCheapestCombination(hours int, packages []models.StorePackagePrice) (float64, string) {
+func dpCheapestCombination(hours int, packages []models.StorePackagePrice) (money.Rupiah, string) {
 	// Urutkan descending duration supaya greedy memilih paket besar dulu
 	pkgs := make([]models.StorePackagePrice, len(packages))
 	copy(pkgs, packages)
@@ -622,7 +626,7 @@ func dpCheapestCombination(hours int, packages []models.StorePackagePrice) (floa
 		return pkgs[i].DurationHours > pkgs[j].DurationHours
 	})
 
-	totalPrice := 0.0
+	var totalPrice money.Rupiah
 	remaining := hours
 	var parts []string
 
@@ -631,7 +635,7 @@ func dpCheapestCombination(hours int, packages []models.StorePackagePrice) (floa
 		if best == nil {
 			// Fallback ke paket 1 jam
 			p1h := getPriceForDuration(1, pkgs)
-			totalPrice += p1h * float64(remaining)
+			totalPrice += p1h * money.Rupiah(remaining)
 			if remaining > 1 {
 				parts = append(parts, fmt.Sprintf("%d× Paket 1 Jam", remaining))
 			} else {
@@ -648,15 +652,15 @@ func dpCheapestCombination(hours int, packages []models.StorePackagePrice) (floa
 }
 
 // findBestPackageForRemaining cari paket yang ≤ remaining jam dengan harga/jam termurah.
+// Harga per jam dibandingkan tanpa pembagian: a.Price/a.Hours < b.Price/b.Hours
+// sama dengan a.Price*b.Hours < b.Price*a.Hours (jam selalu > 0). Seri tetap
+// memilih paket yang ditemukan lebih dulu, sama seperti versi float.
 func findBestPackageForRemaining(remaining int, packages []models.StorePackagePrice) *models.StorePackagePrice {
 	var best *models.StorePackagePrice
-	bestPPH := math.MaxFloat64
 	for i := range packages {
 		pkg := &packages[i]
 		if int(pkg.DurationHours) <= remaining && pkg.DurationHours > 0 {
-			pph := pkg.Price / float64(pkg.DurationHours)
-			if pph < bestPPH {
-				bestPPH = pph
+			if best == nil || pkg.Price*money.Rupiah(best.DurationHours) < best.Price*money.Rupiah(pkg.DurationHours) {
 				best = pkg
 			}
 		}
@@ -664,7 +668,7 @@ func findBestPackageForRemaining(remaining int, packages []models.StorePackagePr
 	return best
 }
 
-func getPriceForDuration(hours uint, packages []models.StorePackagePrice) float64 {
+func getPriceForDuration(hours uint, packages []models.StorePackagePrice) money.Rupiah {
 	for _, p := range packages {
 		if p.DurationHours == hours {
 			return p.Price

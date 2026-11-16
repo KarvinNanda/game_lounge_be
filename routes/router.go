@@ -33,7 +33,9 @@ import (
 )
 
 func SetupRouter() *gin.Engine {
-	r := gin.Default()
+	// Not gin.Default(): its access log would print reset/recovery tokens from the URL path.
+	r := gin.New()
+	r.Use(middleware.RequestLogger(), gin.Recovery())
 
 	// ── Trusted proxies ───────────────────────────────────────
 	// Default: tidak percaya proxy manapun → ClientIP() tidak bisa dispoof
@@ -273,18 +275,21 @@ func SetupRouter() *gin.Engine {
 		protected.PATCH("banners/:id/toggle", middleware.RequirePermission("settings.branches"), bannerCtrl.ToggleActive)
 
 		// ── FnB — Admin ───────────────────────────────────────────────
+		// Off unless FNB_ENABLED=true (utils.FnbEnabled): unregistered routes return 404.
 		// Note: rute statis (sync-moka) didaftarkan SEBELUM /:id
 		// agar Gin tidak menganggapnya sebagai category/item ID.
-		protected.GET("fnb/categories", middleware.RequirePermission("orders_fnb.view"), fnbCtrl.AdminGetCategories)
-		protected.POST("fnb/categories", middleware.RequirePermission("orders_fnb.edit"), fnbCtrl.AdminCreateCategory)
-		protected.PUT("fnb/categories/:id", middleware.RequirePermission("orders_fnb.edit"), fnbCtrl.AdminUpdateCategory)
-		protected.DELETE("fnb/categories/:id", middleware.RequirePermission("orders_fnb.edit"), fnbCtrl.AdminDeleteCategory)
-		protected.GET("fnb/items", middleware.RequirePermission("orders_fnb.view"), fnbCtrl.AdminGetItems)
-		protected.POST("fnb/items", middleware.RequirePermission("orders_fnb.edit"), fnbCtrl.AdminCreateItem)
-		protected.PUT("fnb/items/:id", middleware.RequirePermission("orders_fnb.edit"), fnbCtrl.AdminUpdateItem)
-		protected.GET("fnb/orders", middleware.RequirePermission("orders_fnb.view"), middleware.ScopeStoreQuery(), fnbCtrl.AdminGetOrders)
-		protected.PUT("fnb/orders/:id/status", middleware.RequirePermission("orders_fnb.edit"), middleware.RequireEntityStore("id", middleware.StoreOf("fnb_orders")), fnbCtrl.AdminUpdateOrderStatus)
-		protected.POST("fnb/sync-moka", middleware.RequirePermission("orders_fnb.edit"), fnbCtrl.AdminSyncMoka)
+		if utils.FnbEnabled() {
+			protected.GET("fnb/categories", middleware.RequirePermission("orders_fnb.view"), fnbCtrl.AdminGetCategories)
+			protected.POST("fnb/categories", middleware.RequirePermission("orders_fnb.edit"), fnbCtrl.AdminCreateCategory)
+			protected.PUT("fnb/categories/:id", middleware.RequirePermission("orders_fnb.edit"), fnbCtrl.AdminUpdateCategory)
+			protected.DELETE("fnb/categories/:id", middleware.RequirePermission("orders_fnb.edit"), fnbCtrl.AdminDeleteCategory)
+			protected.GET("fnb/items", middleware.RequirePermission("orders_fnb.view"), fnbCtrl.AdminGetItems)
+			protected.POST("fnb/items", middleware.RequirePermission("orders_fnb.edit"), fnbCtrl.AdminCreateItem)
+			protected.PUT("fnb/items/:id", middleware.RequirePermission("orders_fnb.edit"), fnbCtrl.AdminUpdateItem)
+			protected.GET("fnb/orders", middleware.RequirePermission("orders_fnb.view"), middleware.ScopeStoreQuery(), fnbCtrl.AdminGetOrders)
+			protected.PUT("fnb/orders/:id/status", middleware.RequirePermission("orders_fnb.edit"), middleware.RequireEntityStore("id", middleware.StoreOf("fnb_orders")), fnbCtrl.AdminUpdateOrderStatus)
+			protected.POST("fnb/sync-moka", middleware.RequirePermission("orders_fnb.edit"), fnbCtrl.AdminSyncMoka)
+		}
 	}
 
 	// ── Customer auth (tidak perlu JWT) ──────────────────────────
@@ -337,8 +342,10 @@ func SetupRouter() *gin.Engine {
 		}
 
 		// ── FnB — Customer ────────────────────────────────────────────────────
-		customerProtected.POST("/fnb/orders", fnbCtrl.CustomerCreateOrder)
-		customerProtected.GET("/fnb/orders", fnbCtrl.CustomerGetMyOrders)
+		if utils.FnbEnabled() {
+			customerProtected.POST("/fnb/orders", fnbCtrl.CustomerCreateOrder)
+			customerProtected.GET("/fnb/orders", fnbCtrl.CustomerGetMyOrders)
+		}
 	}
 
 	// ── Public (tanpa auth, untuk customer web) ───────────────────
@@ -356,7 +363,9 @@ func SetupRouter() *gin.Engine {
 		publicGroup.GET("/play-credits/packages", customerAppCtrl.PublicGetPlayCreditsPackages)
 		publicGroup.GET("/event-booking/availability", customerAppCtrl.CheckEventAvailability)
 		publicGroup.GET("/event-booking/quote", customerAppCtrl.QuoteEventBooking)
-		publicGroup.GET("/fnb/menu", fnbCtrl.GetPublicMenu)
+		if utils.FnbEnabled() {
+			publicGroup.GET("/fnb/menu", fnbCtrl.GetPublicMenu)
+		}
 	}
 
 	// ── Xendit Webhook (tanpa auth, verifikasi via x-callback-token) ──────────

@@ -54,7 +54,11 @@ DB_NAME=game_lounge_db
 JWT_SECRET=replace_with_output_of_openssl_rand_hex_32   # at least 32 characters; the server rejects short secrets
 JWT_EXPIRED_HOURS=24
 
-# SMTP (customer password emails & notifications)
+# Frontend URLs used in links
+APP_URL=http://localhost:5174        # customer app: Xendit redirects, customer reset/set-password links
+ADMIN_APP_URL=http://localhost:5173  # admin app: /admin-recovery/{token} links (super admin forgot password, staff reset)
+
+# SMTP (customer set-password links & notifications)
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_FROM=noreply@gamelounge.com       # sender address (required)
@@ -105,6 +109,9 @@ game_lounge_be/
 │
 ├── cmd/
 │   └── main.go                   # Entry point: init DB, router, server
+│
+├── money/
+│   └── rupiah.go                 # money.Rupiah (int64 rupiah), Scan/Value, PercentOf, PerHour, DivRound
 │
 ├── config/
 │   ├── config.go                 # LoadEnv, GetEnv helper
@@ -209,7 +216,7 @@ game_lounge_be/
 │   │   ├── controller/           # Customer CRUD + update-notes + resend-password
 │   │   ├── dto/                  # CreateCustomerRequest, UpdateCustomerRequest, CustomerListFilter
 │   │   ├── repository/           # SyncFavoriteRoomTypes, FindCustomerByEmail/Whatsapp
-│   │   └── service/              # Generate & hash password, send email (async)
+│   │   └── service/              # One-time set-password link (72h), send email (async)
 │   │
 │   ├── booking/
 │   │   ├── controller/           # Booking CRUD + dashboard + sessions-ending-soon + cancel/complete
@@ -257,7 +264,7 @@ game_lounge_be/
 │   ├── bcrypt.go                 # HashPassword, CheckPassword
 │   ├── response.go               # ResponseSuccess, ResponseError, ResponseSuccessPaginate, Meta
 │   ├── upload.go                 # SaveFileToAssets, InitAssetsDir, DeleteFile
-│   ├── email.go                  # dispatch, SendEmail (plain text→HTML), SendHTMLEmail, SendCustomerPasswordEmail
+│   ├── email.go                  # dispatch, SendEmail (plain text→HTML), SendHTMLEmail, SendCustomerSetPasswordEmail
 │   ├── email_templates.go        # BuildBookingEmailHTML, BuildVoucherEmailHTML (designed HTML fallback)
 │   ├── template_renderer.go      # RenderTemplate ({{var}} substitution), GetTemplateOrFallback
 │   └── password_generator.go     # GeneratePasswordFromName (character substitution + #Gl suffix)
@@ -297,7 +304,7 @@ The staff tables below are relative to `/api/admin` (example: `/stores` = `/api/
 | POST | `/auth/login` | Login; the server sets the `staff_token` cookie |
 | POST | `/admin-recovery/request` | Send a password reset link to the super admin email |
 | GET | `/admin-recovery/:token/validate` | Validate the token before the reset form is shown |
-| POST | `/admin-recovery/:token/reset` | Reset the super admin password with a valid token |
+| POST | `/admin-recovery/:token/reset` | Set a new password with a valid token: super admin forgot-password links, and staff links created by `POST /staffs/:id/reset-password` |
 
 > **Admin Recovery**: the `/request` response is always the same (200 OK), so an attacker cannot tell whether an email is registered. Rate limit: max 3 requests/hour per IP. The token is valid for 15 minutes and can be used only once.
 
@@ -337,7 +344,7 @@ Response:
 | GET | `/staffs/:id` | Staff detail |
 | PUT | `/staffs/:id` | Update staff |
 | DELETE | `/staffs/:id` | Delete staff (soft delete) |
-| POST | `/staffs/:id/reset-password` | Reset a staff password and send an email (Super Admin only) |
+| POST | `/staffs/:id/reset-password` | Super Admin only. The old password stops working and all sessions end; the staff gets a one-time `{ADMIN_APP_URL}/admin-recovery/{token}` link (valid 24h). No password is emailed. If the email fails the request returns an error |
 
 #### Facility Categories
 | Method | Endpoint | Description |
@@ -369,10 +376,10 @@ Response:
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/stores` | List stores (+ operating hours, holidays, room count) |
-| POST | `/stores` | Create a store |
+| POST | `/stores` | Create a store. `rooms` is validated before the store is created: unknown, inactive or deleted room types and a negative `unit_count` return 400 |
 | GET | `/stores/operating-hours` | Effective store operating hours on a given date |
 | GET | `/stores/:id` | Store detail (+ rooms → template → facilities → category) |
-| PUT | `/stores/:id` | Update a store |
+| PUT | `/stores/:id` | Update a store. `rooms` only adds units: a higher `unit_count` creates new units, the same count changes nothing, a lower count is rejected (deactivate units with `PATCH /store-rooms/:id/toggle`); new units for an inactive or deleted room type are rejected |
 | DELETE | `/stores/:id` | Delete a store (soft delete) |
 | GET | `/stores/:id/event-price` | Get the event price per day for this store |
 | PUT | `/stores/:id/event-price` | Set/update the event price per day for this store |
@@ -462,12 +469,12 @@ Priority: **Global Holiday** → **Store Holiday** → **Regular Hours** (weekda
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/customers` | List customers (filter: search, type, store_id) |
-| POST | `/customers` | Create a customer |
+| POST | `/customers` | Create a customer. With an email, the customer gets a one-time set-password link (valid 72h) instead of a password |
 | GET | `/customers/:id` | Customer detail |
 | PUT | `/customers/:id` | Update a customer |
 | PATCH | `/customers/:id/notes` | Update internal customer notes |
 | DELETE | `/customers/:id` | Delete a customer (soft delete) |
-| POST | `/customers/:id/resend-password` | Resend the password email |
+| POST | `/customers/:id/resend-password` | Send a new set-password link (older unused links stop working; the current password stays until the link is used) |
 
 #### Bookings
 | Method | Endpoint | Description |
@@ -591,7 +598,7 @@ Default **notification_key** values:
 | GET | `/play-credits/packages` | Play credits packages |
 | GET | `/event-booking/availability` | Taken time ranges + `event_price` (query: `store_id`, `date`, optional `start_time`, `end_time`) |
 | GET | `/event-booking/quote` | Customer event price (query: `store_id`, `booking_date`, `start_time`, `end_time`) |
-| GET | `/fnb/menu` | FnB menu |
+| GET | `/fnb/menu` | FnB menu (only with `FNB_ENABLED=true`, otherwise 404) |
 
 > - Banner and room template responses use a field whitelist. Audit columns (`created_by`, `updated_by`, `deleted_by`, `deleted_at`) and `is_active` are not sent, because `created_by`/`updated_by` contain staff usernames.
 > - `/event-booking/quote` → `{store_id, booking_date, start_time, end_time, duration_hours, price_per_day, total_price, available}`. `total_price` is exactly what `/customer/event-bookings/initiate` charges (rounded to Rp 1,000). `available` = no conflict with regular bookings or other events right now.
@@ -618,15 +625,15 @@ Default **notification_key** values:
 | GET | `/room-recommendations` | Room recommendations |
 | GET | `/credits/expiring` | Play credits that will expire soon |
 | GET | `/my-credits` | The customer's play credits |
-| GET | `/vouchers/available` | Usable vouchers |
+| GET | `/vouchers/available` | Usable vouchers (query: `store_id`, `include_reserved=true` also lists vouchers held by a booking hold, with `reserved_until` and `hold_id`; the voucher comes back about 1 hour after the hold expires) |
 | POST | `/bookings/initiate` | Create a hold + Xendit invoice |
 | GET | `/bookings` | List bookings (query: `page`, `per_page` max 50, `status`) |
 | GET | `/bookings/by-hold/:hold_id` | Payment status of a hold, for the payment success page |
 | GET | `/bookings/:id` | Booking detail |
 | POST | `/play-credits/purchase/initiate` | Buy a play credits package (Xendit invoice) |
 | POST | `/event-bookings/initiate` | Create an event booking + Xendit invoice |
-| POST | `/fnb/orders` | Order FnB |
-| GET | `/fnb/orders` | FnB order history |
+| POST | `/fnb/orders` | Order FnB (only with `FNB_ENABLED=true`, otherwise 404) |
+| GET | `/fnb/orders` | FnB order history (only with `FNB_ENABLED=true`, otherwise 404) |
 
 The `.../mock-confirm` endpoints (booking, play credits, event) are registered only when `XENDIT_SECRET_KEY` is empty (dev mock mode).
 
@@ -722,6 +729,21 @@ Every record has these columns:
 | `deleted_at` | Soft delete timestamp (null = active) |
 
 > **Bookings** do not use soft delete. Records are permanent because they are financial records.
+
+---
+
+## Money
+
+All amounts are whole rupiah: Go type `money.Rupiah` (int64, package `money/`). Money math never uses float64.
+
+- **DB:** columns stay `decimal(12,2)`. `Rupiah` implements `sql.Scanner`, because the MySQL driver returns them as text (`"50000.00"`). A stored value with a non-zero fraction is a scan error, not a silent rounding.
+- **JSON:** amounts are plain integers. A request with a fractional amount (`15000.5`) is rejected with 400.
+- **Rounding (half up, to whole rupiah):**
+  - Voucher percentage: `money.PercentOf` (up to 2 decimals in the percentage).
+  - Happy hour and flash sale segments: `money.PerHour(price_per_hour, minutes)`, rounded per segment.
+  - Event price: `price_per_day × minutes / 1440`, rounded to Rp 1.000.
+  - Sales `avg_per_transaction`: `money.DivRound`.
+- **Not money, still decimal:** hours (`duration_hours`, `total_hours`, `remaining_hours`), percentages, and `vouchers.discount_value` (a percentage or a rupiah amount by `discount_type`; a nominal value must be whole).
 
 ---
 

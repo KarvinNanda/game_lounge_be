@@ -1,6 +1,9 @@
 package service
 
 import (
+	"game_lounge_be/money"
+	"math"
+
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -44,9 +47,9 @@ func UpdateCategory(id uint, req dto.UpdateCategoryRequest, actor string) (*mode
 	if err != nil {
 		return nil, errors.New("kategori tidak ditemukan")
 	}
-	cat.Name      = req.Name
+	cat.Name = req.Name
 	cat.SortOrder = req.SortOrder
-	cat.IsActive  = req.IsActive
+	cat.IsActive = req.IsActive
 	cat.UpdatedBy = &actor
 	if req.Description != "" {
 		cat.Description = &req.Description
@@ -88,13 +91,13 @@ func UpdateItem(id uint, req dto.UpdateItemRequest, actor string) (*models.FnbIt
 	if err != nil {
 		return nil, errors.New("item tidak ditemukan")
 	}
-	item.CategoryID  = req.CategoryID
-	item.Name        = req.Name
-	item.Price       = req.Price
-	item.SortOrder   = req.SortOrder
+	item.CategoryID = req.CategoryID
+	item.Name = req.Name
+	item.Price = req.Price
+	item.SortOrder = req.SortOrder
 	item.IsAvailable = req.IsAvailable
-	item.IsActive    = req.IsActive
-	item.UpdatedBy   = &actor
+	item.IsActive = req.IsActive
+	item.UpdatedBy = &actor
 	if req.Description != "" {
 		item.Description = &req.Description
 	}
@@ -122,7 +125,7 @@ func CreateFnbOrder(req dto.CreateFnbOrderRequest, customerID string) (*models.F
 
 	// Hitung total + buat order items
 	var orderItems []models.FnbOrderItem
-	totalAmount := 0.0
+	var totalAmount money.Rupiah
 
 	for _, reqItem := range req.Items {
 		item, err := repository.FindItemByID(reqItem.ItemID)
@@ -133,12 +136,12 @@ func CreateFnbOrder(req dto.CreateFnbOrderRequest, customerID string) (*models.F
 			return nil, fmt.Errorf("item '%s' tidak tersedia saat ini", item.Name)
 		}
 
-		subtotal := item.Price * float64(reqItem.Quantity)
+		subtotal := item.Price * money.Rupiah(reqItem.Quantity)
 		totalAmount += subtotal
 
 		oi := models.FnbOrderItem{
 			ItemID:   item.ID,
-			ItemName: item.Name,   // snapshot nama saat order
+			ItemName: item.Name, // snapshot nama saat order
 			Quantity: reqItem.Quantity,
 			Price:    item.Price, // snapshot harga saat order
 		}
@@ -207,8 +210,8 @@ func UpdateOrderStatus(id, status string) (*models.FnbOrder, error) {
 // SyncFromMoka mengambil menu dari Moka POS API dan upsert ke DB kita.
 // Mengembalikan jumlah kategori dan item yang berhasil di-sync.
 func SyncFromMoka() (catSynced, itemSynced int, err error) {
-	baseURL  := os.Getenv("MOKA_BASE_URL")
-	token    := os.Getenv("MOKA_ACCESS_TOKEN")
+	baseURL := os.Getenv("MOKA_BASE_URL")
+	token := os.Getenv("MOKA_ACCESS_TOKEN")
 	outletID := os.Getenv("MOKA_OUTLET_ID")
 
 	if token == "" || outletID == "" {
@@ -255,7 +258,7 @@ func SyncFromMoka() (catSynced, itemSynced int, err error) {
 				repository.CreateCategory(newCat) //nolint:errcheck
 			} else {
 				// Update nama saja
-				existing.Name      = mokaCat.Name
+				existing.Name = mokaCat.Name
 				existing.UpdatedBy = &actor
 				repository.UpdateCategory(existing) //nolint:errcheck
 			}
@@ -286,7 +289,7 @@ func SyncFromMoka() (catSynced, itemSynced int, err error) {
 				newItem := &models.FnbItem{
 					CategoryID:  localCatID,
 					Name:        mokaItem.Name,
-					Price:       mokaItem.Price,
+					Price:       money.Rupiah(math.Round(mokaItem.Price)), // Moka may send 15000.0
 					MokaItemID:  &mokaID,
 					IsAvailable: true,
 					IsActive:    true,
@@ -301,10 +304,10 @@ func SyncFromMoka() (catSynced, itemSynced int, err error) {
 				repository.CreateItem(newItem) //nolint:errcheck
 			} else {
 				// Update data
-				existing.Name       = mokaItem.Name
-				existing.Price      = mokaItem.Price
+				existing.Name = mokaItem.Name
+				existing.Price = money.Rupiah(math.Round(mokaItem.Price))
 				existing.CategoryID = localCatID
-				existing.UpdatedBy  = &actor
+				existing.UpdatedBy = &actor
 				if mokaItem.Description != "" {
 					existing.Description = &mokaItem.Description
 				}

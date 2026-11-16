@@ -285,6 +285,13 @@ func DeleteHold(id string) error {
 // datang terlambat masih bisa menemukan hold-nya (lihat ConfirmBookingFromWebhook).
 const holdGracePeriod = time.Hour
 
+// VoucherReleaseAt is when CleanExpiredHolds may release the voucher reservation
+// of a hold that expires at expiresAt. The cleanup job runs every minute, so the
+// actual release can be up to one job interval later.
+func VoucherReleaseAt(expiresAt time.Time) time.Time {
+	return expiresAt.Add(holdGracePeriod)
+}
+
 // CleanExpiredHolds menghapus hold yang sudah expire lebih dari holdGracePeriod.
 // Dipanggil periodik oleh jobs.StartCleanup.
 // Reservasi voucher milik hold tersebut ikut dilepas supaya voucher bisa dipakai lagi.

@@ -4,6 +4,7 @@ import (
 	"game_lounge_be/config"
 	"game_lounge_be/models"
 
+	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
@@ -42,34 +43,48 @@ func FindStoreByID(id string) (*models.Store, error) {
 	return &store, err
 }
 
-func CreateStore(store *models.Store) error {
-	return config.DB.Create(store).Error
+func CreateStore(db *gorm.DB, store *models.Store) error {
+	return db.Create(store).Error
 }
 
-func UpdateStore(store *models.Store) error {
+func UpdateStore(db *gorm.DB, store *models.Store) error {
 	// Omit associations so preloaded slices don't cascade into upsert
-	return config.DB.Omit(clause.Associations).Save(store).Error
+	return db.Omit(clause.Associations).Save(store).Error
 }
 
+// SoftDeleteStore soft-deletes the store and its rooms in one transaction.
+// Rooms are soft-deleted (not hard-deleted) because bookings point at them.
 func SoftDeleteStore(store *models.Store, deletedBy string) error {
-	return config.DB.Model(store).Updates(map[string]interface{}{
-		"deleted_by": deletedBy,
-		"deleted_at": config.DB.NowFunc(),
-	}).Error
+	return config.DB.Transaction(func(tx *gorm.DB) error {
+		now := tx.NowFunc()
+		if err := tx.Model(store).Updates(map[string]interface{}{
+			"deleted_by": deletedBy,
+			"deleted_at": now,
+		}).Error; err != nil {
+			return err
+		}
+		return tx.Model(&models.StoreRoom{}).
+			Where("store_id = ? AND deleted_at IS NULL", store.ID).
+			Updates(map[string]interface{}{"is_active": false, "deleted_by": deletedBy, "deleted_at": now}).Error
+	})
 }
 
 // Operating Hours
-func UpsertOperatingHours(storeID string, hours []models.StoreOperatingHour) error {
-	tx := config.DB.Begin()
-	tx.Where("store_id = ?", storeID).Delete(&models.StoreOperatingHour{})
-	for _, h := range hours {
-		h.StoreID = storeID
-		if err := tx.Create(&h).Error; err != nil {
-			tx.Rollback()
+// UpsertOperatingHours replaces the store's hours. db may be a transaction; the
+// nested Transaction then becomes a savepoint.
+func UpsertOperatingHours(db *gorm.DB, storeID string, hours []models.StoreOperatingHour) error {
+	return db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("store_id = ?", storeID).Delete(&models.StoreOperatingHour{}).Error; err != nil {
 			return err
 		}
-	}
-	return tx.Commit().Error
+		for _, h := range hours {
+			h.StoreID = storeID
+			if err := tx.Create(&h).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func FindOperatingHoursByStore(storeID string) ([]models.StoreOperatingHour, error) {
@@ -85,17 +100,20 @@ func FindOperatingHourByStoreAndDay(storeID string, day string) (*models.StoreOp
 }
 
 // Holiday Schedules
-func UpsertHolidaySchedules(storeID string, holidays []models.StoreHolidaySchedule) error {
-	tx := config.DB.Begin()
-	tx.Where("store_id = ?", storeID).Delete(&models.StoreHolidaySchedule{})
-	for _, h := range holidays {
-		h.StoreID = storeID
-		if err := tx.Create(&h).Error; err != nil {
-			tx.Rollback()
+// UpsertHolidaySchedules replaces the store's holidays. db may be a transaction.
+func UpsertHolidaySchedules(db *gorm.DB, storeID string, holidays []models.StoreHolidaySchedule) error {
+	return db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("store_id = ?", storeID).Delete(&models.StoreHolidaySchedule{}).Error; err != nil {
 			return err
 		}
-	}
-	return tx.Commit().Error
+		for _, h := range holidays {
+			h.StoreID = storeID
+			if err := tx.Create(&h).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func FindHolidaysByStore(storeID string) ([]models.StoreHolidaySchedule, error) {
@@ -114,8 +132,8 @@ func FindRoomsByStore(storeID string) ([]models.StoreRoom, error) {
 	return rooms, err
 }
 
-func CreateStoreRooms(rooms []models.StoreRoom) error {
-	return config.DB.Create(&rooms).Error
+func CreateStoreRooms(db *gorm.DB, rooms []models.StoreRoom) error {
+	return db.Create(&rooms).Error
 }
 
 func DeleteStoreRoomsByTemplate(storeID string, templateID uint) error {
@@ -136,6 +154,9 @@ func GetStoreStats() map[string]int64 {
 	config.DB.Model(&models.Store{}).Where("deleted_at IS NULL AND status = 'active'").Count(&active)
 	config.DB.Model(&models.Store{}).Where("deleted_at IS NULL AND status = 'inactive'").Count(&inactive)
 	var totalRooms int64
-	config.DB.Model(&models.StoreRoom{}).Where("deleted_at IS NULL AND is_active = true").Count(&totalRooms)
+	// Joined to stores as a second guard: rooms of a deleted store never count.
+	config.DB.Model(&models.StoreRoom{}).
+		Joins("JOIN stores ON stores.id = store_rooms.store_id AND stores.deleted_at IS NULL").
+		Where("store_rooms.deleted_at IS NULL AND store_rooms.is_active = true").Count(&totalRooms)
 	return map[string]int64{"total": total, "active": active, "inactive": inactive, "total_rooms": totalRooms}
 }

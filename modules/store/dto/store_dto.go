@@ -1,14 +1,14 @@
 package dto
 
 type OperatingHourInput struct {
-	DayType   string `json:"day_type"`
+	DayType   string `json:"day_type" binding:"required,oneof=weekday weekend"`
 	OpenTime  string `json:"open_time"`
 	CloseTime string `json:"close_time"`
 	IsActive  bool   `json:"is_active"`
 }
 
 type HolidayInput struct {
-	Date      string `json:"date"`
+	Date      string `json:"date" binding:"required,datetime=2006-01-02"`
 	OpenTime  string `json:"open_time"`
 	CloseTime string `json:"close_time"`
 }
@@ -27,8 +27,8 @@ type CreateStoreRequest struct {
 	PhotoURL       string               `json:"photo_url"`
 	LinkGmaps      string               `json:"link_gmaps"`
 	Status         string               `json:"status"`
-	OperatingHours []OperatingHourInput `json:"operating_hours"`
-	Holidays       []HolidayInput       `json:"holidays"`
+	OperatingHours []OperatingHourInput `json:"operating_hours" binding:"dive"`
+	Holidays       []HolidayInput       `json:"holidays" binding:"dive"`
 	Rooms          []RoomSetupInput     `json:"rooms"`
 }
 
@@ -41,8 +41,8 @@ type UpdateStoreRequest struct {
 	PhotoURL       string               `json:"photo_url"`
 	LinkGmaps      string               `json:"link_gmaps"`
 	Status         string               `json:"status"`
-	OperatingHours []OperatingHourInput `json:"operating_hours"`
-	Holidays       []HolidayInput       `json:"holidays"`
+	OperatingHours []OperatingHourInput `json:"operating_hours" binding:"dive"`
+	Holidays       []HolidayInput       `json:"holidays" binding:"dive"`
 	Rooms          []RoomSetupInput     `json:"rooms"`
 }
 

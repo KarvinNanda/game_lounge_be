@@ -35,6 +35,8 @@ func TestProductionConfigErrors(t *testing.T) {
 		"XENDIT_SECRET_KEY":    "xnd_production_x",
 		"XENDIT_WEBHOOK_TOKEN": "tok",
 		"COOKIE_SECURE":        "",
+		"APP_URL":              "https://app.example.com",
+		"ADMIN_APP_URL":        "https://admin.example.com",
 	}
 
 	t.Run("config lengkap → tidak ada error", func(t *testing.T) {
@@ -51,7 +53,7 @@ func TestProductionConfigErrors(t *testing.T) {
 			t.Errorf("dev tidak dicek, got %v", errs)
 		}
 	})
-	for _, missing := range []string{"ALLOWED_ORIGINS", "XENDIT_SECRET_KEY", "XENDIT_WEBHOOK_TOKEN"} {
+	for _, missing := range []string{"ALLOWED_ORIGINS", "XENDIT_SECRET_KEY", "XENDIT_WEBHOOK_TOKEN", "APP_URL", "ADMIN_APP_URL"} {
 		t.Run(missing+" kosong → error", func(t *testing.T) {
 			set(t, good)
 			t.Setenv(missing, "")
@@ -67,4 +69,24 @@ func TestProductionConfigErrors(t *testing.T) {
 			t.Errorf("want 1 error, got %v", errs)
 		}
 	})
+}
+
+func TestFnbEnabled(t *testing.T) {
+	cases := []struct {
+		env  string
+		want bool
+	}{
+		{"", false}, // default off: FnB is out of scope (decision 2026-11-16)
+		{"false", false},
+		{"yes", false},
+		{"true", true},
+	}
+	for _, tc := range cases {
+		t.Run("FNB_ENABLED="+tc.env, func(t *testing.T) {
+			t.Setenv("FNB_ENABLED", tc.env)
+			if got := FnbEnabled(); got != tc.want {
+				t.Errorf("want %v, got %v", tc.want, got)
+			}
+		})
+	}
 }

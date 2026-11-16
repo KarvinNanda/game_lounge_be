@@ -1,36 +1,8 @@
 package utils
 
 import (
-	"strings"
 	"testing"
 )
-
-// ── GenerateRandomPassword ────────────────────────────────────
-
-func TestGenerateRandomPassword_PanjangDanAlfabet(t *testing.T) {
-	for i := 0; i < 50; i++ {
-		p := GenerateRandomPassword()
-		if len(p) != 14 {
-			t.Fatalf("panjang harus 14, got %d (%q)", len(p), p)
-		}
-		for _, ch := range p {
-			if !strings.ContainsRune(passwordAlphabet, ch) {
-				t.Fatalf("karakter %q di luar alfabet", ch)
-			}
-		}
-	}
-}
-
-func TestGenerateRandomPassword_TidakBerulang(t *testing.T) {
-	seen := map[string]bool{}
-	for i := 0; i < 200; i++ {
-		p := GenerateRandomPassword()
-		if seen[p] {
-			t.Fatalf("password berulang: %q", p)
-		}
-		seen[p] = true
-	}
-}
 
 // ── RenderTemplate ────────────────────────────────────────────
 
