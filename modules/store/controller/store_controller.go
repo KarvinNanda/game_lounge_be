@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"errors"
 	"net/http"
 	"time"
 
@@ -61,7 +62,11 @@ func Create(c *gin.Context) {
 	actorName := c.GetString("staff_username")
 	store, err := service.CreateStore(req, actorName)
 	if err != nil {
-		utils.ResponseError(c, http.StatusInternalServerError, err.Error())
+		status := http.StatusInternalServerError
+		if errors.Is(err, service.ErrRoomSetup) {
+			status = http.StatusBadRequest
+		}
+		utils.ResponseError(c, status, err.Error())
 		return
 	}
 	utils.ResponseSuccess(c, http.StatusCreated, "Store berhasil dibuat", store)

@@ -369,10 +369,10 @@ Response:
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/stores` | List stores (+ operating hours, holidays, room count) |
-| POST | `/stores` | Create a store |
+| POST | `/stores` | Create a store. `rooms` is validated before the store is created: unknown, inactive or deleted room types and a negative `unit_count` return 400 |
 | GET | `/stores/operating-hours` | Effective store operating hours on a given date |
 | GET | `/stores/:id` | Store detail (+ rooms → template → facilities → category) |
-| PUT | `/stores/:id` | Update a store |
+| PUT | `/stores/:id` | Update a store. `rooms` only adds units: a higher `unit_count` creates new units, the same count changes nothing, a lower count is rejected (deactivate units with `PATCH /store-rooms/:id/toggle`); new units for an inactive or deleted room type are rejected |
 | DELETE | `/stores/:id` | Delete a store (soft delete) |
 | GET | `/stores/:id/event-price` | Get the event price per day for this store |
 | PUT | `/stores/:id/event-price` | Set/update the event price per day for this store |
