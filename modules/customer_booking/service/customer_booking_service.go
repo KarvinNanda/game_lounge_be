@@ -108,32 +108,15 @@ func InitiateBooking(req InitiateBookingRequest, customerID string) (map[string]
 
 	// 4. Aplikasikan voucher jika ada — validasi lengkap yang sama dengan admin
 	// (tanggal, tipe, store, room type, minimum, member, 1x per customer).
-	var discountAmount money.Rupiah
-	voucherCode := ""
+	applied, err := applyVoucher(customerID, req.StoreID, req.RoomTemplateID, req.VoucherID, totalPrice)
+	if err != nil {
+		return nil, err
+	}
+	discountAmount, voucherCode := applied.Discount, applied.Code
 	var reservation *models.VoucherUsage
-	if req.VoucherID != "" {
-		voucher, err := voucherRepo.FindVoucherByID(req.VoucherID)
-		if err != nil {
-			return nil, errors.New("voucher tidak ditemukan")
-		}
-		check, err := voucherService.ValidateVoucher(voucherDto.ValidateVoucherRequest{
-			Code:           voucher.Code,
-			CustomerID:     customerID,
-			StoreID:        req.StoreID,
-			Amount:         totalPrice,
-			UseType:        "booking",
-			RoomTemplateID: req.RoomTemplateID,
-		})
-		if err != nil {
-			return nil, err
-		}
-		if !check.IsValid {
-			return nil, errors.New(check.Message)
-		}
-		discountAmount = check.DiscountAmount
-		voucherCode = voucher.Code
+	if applied.VoucherID != "" {
 		reservation = &models.VoucherUsage{
-			VoucherID:      voucher.ID,
+			VoucherID:      applied.VoucherID,
 			CustomerID:     customerID,
 			DiscountAmount: discountAmount,
 		}
@@ -281,6 +264,71 @@ func quoteSlots(storeID string, roomTemplateID uint, bookingDate string, selecte
 		return nil, errors.New("gagal menghitung harga")
 	}
 	return &slotQuote{StartTime: start, EndTime: end, Hours: hours, Available: available, Price: price}, nil
+}
+
+// appliedVoucher is the result of checking a voucher against a booking price.
+// Empty VoucherID means no voucher was requested.
+type appliedVoucher struct {
+	VoucherID string
+	Code      string
+	Discount  money.Rupiah
+}
+
+// applyVoucher runs the full voucher check (dates, type, store, room type,
+// minimum, member, one use per customer) and returns the discount. It is the
+// single place that prices a voucher for a customer booking: InitiateBooking and
+// QuoteBookingForCustomer both call it, so the quote always equals the charge.
+// It never writes: the reservation is created by InitiateBooking.
+func applyVoucher(customerID, storeID string, roomTemplateID uint, voucherID string, amount money.Rupiah) (appliedVoucher, error) {
+	if voucherID == "" {
+		return appliedVoucher{}, nil
+	}
+	voucher, err := voucherRepo.FindVoucherByID(voucherID)
+	if err != nil {
+		return appliedVoucher{}, errors.New("voucher tidak ditemukan")
+	}
+	check, err := voucherService.ValidateVoucher(voucherDto.ValidateVoucherRequest{
+		Code:           voucher.Code,
+		CustomerID:     customerID,
+		StoreID:        storeID,
+		Amount:         amount,
+		UseType:        "booking",
+		RoomTemplateID: roomTemplateID,
+	})
+	if err != nil {
+		return appliedVoucher{}, err
+	}
+	if !check.IsValid {
+		return appliedVoucher{}, errors.New(check.Message)
+	}
+	return appliedVoucher{VoucherID: voucher.ID, Code: voucher.Code, Discount: check.DiscountAmount}, nil
+}
+
+// QuoteBookingForCustomer = QuoteBooking plus an optional voucher, for a logged-in
+// customer. final_price equals total_price of POST /customer/bookings/initiate for
+// the same input. Read-only: the voucher is not reserved.
+func QuoteBookingForCustomer(customerID, storeID string, roomTemplateID uint, bookingDate string, selected []string, voucherID string) (map[string]interface{}, error) {
+	quote, err := QuoteBooking(storeID, roomTemplateID, bookingDate, selected)
+	if err != nil {
+		return nil, err
+	}
+	total, ok := quote["total_price"].(money.Rupiah)
+	if !ok {
+		return nil, errors.New("gagal menghitung harga")
+	}
+	applied, err := applyVoucher(customerID, storeID, roomTemplateID, voucherID, total)
+	if err != nil {
+		return nil, err
+	}
+	quote["voucher_id"] = nil
+	quote["voucher_code"] = nil
+	if applied.VoucherID != "" {
+		quote["voucher_id"] = applied.VoucherID
+		quote["voucher_code"] = applied.Code
+	}
+	quote["discount_amount"] = applied.Discount
+	quote["final_price"] = total - applied.Discount
+	return quote, nil
 }
 
 // QuoteBooking = harga booking tanpa membuat hold (read-only, publik).

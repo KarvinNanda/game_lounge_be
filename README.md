@@ -626,6 +626,7 @@ Default **notification_key** values:
 | GET | `/credits/expiring` | Play credits that will expire soon |
 | GET | `/my-credits` | The customer's play credits |
 | GET | `/vouchers/available` | Usable vouchers (query: `store_id`, `include_reserved=true` also lists vouchers held by a booking hold, with `reserved_until` and `hold_id`; the voucher comes back about 1 hour after the hold expires) |
+| GET | `/bookings/quote` | Price for the selected slots with an optional `voucher_id` (same query as `/public/booking/quote`). Adds `voucher_id`, `voucher_code`, `discount_amount` and `final_price`; `final_price` equals `total_price` of `/bookings/initiate` (both use `applyVoucher`). Read-only, the voucher is not reserved. Invalid voucher: 400 with the same message as initiate |
 | POST | `/bookings/initiate` | Create a hold + Xendit invoice |
 | GET | `/bookings` | List bookings (query: `page`, `per_page` max 50, `status`) |
 | GET | `/bookings/by-hold/:hold_id` | Payment status of a hold, for the payment success page |

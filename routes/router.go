@@ -317,6 +317,7 @@ func SetupRouter() *gin.Engine {
 		// dianggap sebagai hold_id/booking_id oleh Gin.
 		customerProtected.POST("/bookings/initiate", bookingCustomerCtrl.InitiateBooking)
 		customerProtected.GET("/bookings", bookingCustomerCtrl.GetMyBookings)
+		customerProtected.GET("/bookings/quote", bookingCustomerCtrl.GetCustomerQuote) // static path, before /bookings/:id
 		customerProtected.GET("/bookings/by-hold/:hold_id", pollLimiter, bookingCustomerCtrl.GetMyBookingByHold)
 		customerProtected.GET("/bookings/:id", bookingCustomerCtrl.GetMyBookingByID)
 		// Mock payment — hanya aktif saat XENDIT_SECRET_KEY kosong

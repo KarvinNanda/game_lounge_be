@@ -44,3 +44,13 @@ func TestFnbRoutes_Enabled(t *testing.T) {
 		t.Errorf("want 13 FnB routes, got %d: %v", len(got), got)
 	}
 }
+
+func TestCustomerQuote_RequiresCustomerLogin(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := SetupRouter()
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/customer/bookings/quote?store_id=x&room_template_id=1&booking_date=2030-01-01&selected_slots[]=10:00", nil))
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("GET /api/customer/bookings/quote without a session = %d, want 401", w.Code)
+	}
+}
