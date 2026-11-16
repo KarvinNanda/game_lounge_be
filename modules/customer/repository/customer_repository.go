@@ -120,10 +120,13 @@ func SyncFavoriteRoomTypes(customerID string, roomTemplateIDs []uint) error {
 //   - TotalSpent: same definition as the sales report revenue: non-cancelled
 //     cash bookings plus play credit purchases. Event bookings are not included,
 //     as in the sales report.
+//   - LastVisit: the latest visit (same rule as TotalVisit) as "YYYY-MM-DD HH:MM"
+//     (date and start time), nil when there is none.
 type CustomerStats struct {
 	TotalBooking int64
 	TotalVisit   int64
 	TotalSpent   money.Rupiah
+	LastVisit    *string
 }
 
 // FindCustomerStats returns stats for the given customers in 2 queries.
@@ -139,18 +142,21 @@ func FindCustomerStats(ids []string, today string) (map[string]CustomerStats, er
 		TotalBooking int64
 		TotalVisit   int64
 		Spent        money.Rupiah
+		LastVisit    *string
 	}
 	if err := config.DB.Table("bookings").
 		Select(`customer_id,
 			COUNT(*) AS total_booking,
 			COALESCE(SUM(status = 'completed' OR booking_date < ?), 0) AS total_visit,
-			COALESCE(SUM(CASE WHEN payment_method = 'cash' THEN total_price ELSE 0 END), 0) AS spent`, today).
+			COALESCE(SUM(CASE WHEN payment_method = 'cash' THEN total_price ELSE 0 END), 0) AS spent,
+			MAX(CASE WHEN status = 'completed' OR booking_date < ?
+				THEN CONCAT(DATE_FORMAT(booking_date, '%Y-%m-%d'), ' ', TIME_FORMAT(start_time, '%H:%i')) END) AS last_visit`, today, today).
 		Where("customer_id IN ? AND status != 'cancelled'", ids).
 		Group("customer_id").Scan(&bookingRows).Error; err != nil {
 		return nil, err
 	}
 	for _, r := range bookingRows {
-		out[r.CustomerID] = CustomerStats{TotalBooking: r.TotalBooking, TotalVisit: r.TotalVisit, TotalSpent: r.Spent}
+		out[r.CustomerID] = CustomerStats{TotalBooking: r.TotalBooking, TotalVisit: r.TotalVisit, TotalSpent: r.Spent, LastVisit: r.LastVisit}
 	}
 
 	var creditRows []struct {
