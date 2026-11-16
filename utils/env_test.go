@@ -35,6 +35,7 @@ func TestProductionConfigErrors(t *testing.T) {
 		"XENDIT_SECRET_KEY":    "xnd_production_x",
 		"XENDIT_WEBHOOK_TOKEN": "tok",
 		"COOKIE_SECURE":        "",
+		"APP_URL":              "https://app.example.com",
 	}
 
 	t.Run("config lengkap → tidak ada error", func(t *testing.T) {
@@ -51,7 +52,7 @@ func TestProductionConfigErrors(t *testing.T) {
 			t.Errorf("dev tidak dicek, got %v", errs)
 		}
 	})
-	for _, missing := range []string{"ALLOWED_ORIGINS", "XENDIT_SECRET_KEY", "XENDIT_WEBHOOK_TOKEN"} {
+	for _, missing := range []string{"ALLOWED_ORIGINS", "XENDIT_SECRET_KEY", "XENDIT_WEBHOOK_TOKEN", "APP_URL"} {
 		t.Run(missing+" kosong → error", func(t *testing.T) {
 			set(t, good)
 			t.Setenv(missing, "")

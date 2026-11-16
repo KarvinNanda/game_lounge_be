@@ -8,7 +8,6 @@ import (
 	"game_lounge_be/models"
 	"game_lounge_be/modules/customer/dto"
 	"game_lounge_be/modules/customer/repository"
-	ntService "game_lounge_be/modules/notification_template/service"
 	"game_lounge_be/utils"
 
 	"github.com/google/uuid"
@@ -78,17 +77,8 @@ func CreateCustomer(req dto.CreateCustomerRequest, createdBy string) (*models.Cu
 		}
 	}
 
-	// Generate & hash password jika ada email
-	var plainPassword string
-	if req.Email != "" {
-		plainPassword = utils.GenerateRandomPassword()
-		hash, err := utils.HashPassword(plainPassword)
-		if err != nil {
-			return nil, errors.New("gagal memproses password")
-		}
-		customer.PasswordHash = &hash
-	}
-
+	// No password is generated: the customer sets one through the link in the
+	// welcome message. Until then password_hash is NULL and login is refused.
 	if err := repository.CreateCustomer(customer); err != nil {
 		return nil, errors.New("gagal membuat customer")
 	}
@@ -98,32 +88,21 @@ func CreateCustomer(req dto.CreateCustomerRequest, createdBy string) (*models.Cu
 		_ = repository.SyncFavoriteRoomTypes(customer.ID, req.FavoriteRoomTypes)
 	}
 
-	// Kirim notifikasi via template dari DB (non-blocking)
-	if req.Email != "" && plainPassword != "" {
-		name := req.Name
-		email := req.Email
-		pwd := plainPassword
-		wa := req.Whatsapp
-		utils.SafeGo(func() {
-			tmpl, err := ntService.GetRendered("customer_welcome", map[string]string{
-				"nama_customer": name,
-				"email":         email,
-				"password":      pwd,
-			})
-			if err != nil {
-				// Fallback ke fungsi email lama jika template belum ada di DB
-				_ = utils.SendCustomerPasswordEmail(email, name, pwd)
-				return
-			}
-			if tmpl.IsEmailActive {
-				if sendErr := utils.SendEmail(email, name, tmpl.EmailSubject, tmpl.EmailBody); sendErr != nil {
-					log.Printf("[Customer] Gagal kirim email ke %s: %v", email, sendErr)
+	// Welcome message with a one-time set-password link (non-blocking).
+	// The customer is already saved, so a failure here is only logged: the admin
+	// can send a new link with "resend-password".
+	if req.Email != "" {
+		link, err := issueSetPasswordLink(customer.ID)
+		if err != nil {
+			log.Printf("[Customer] gagal membuat link set password untuk customer %s: %v", customer.ID, err)
+		} else {
+			msg := welcomeMessage{Email: req.Email, Name: req.Name, Whatsapp: req.Whatsapp, Link: link}
+			utils.SafeGo(func() {
+				if err := sendWelcome(msg); err != nil {
+					log.Printf("[Customer] gagal kirim welcome ke customer %s: %v", customer.ID, err)
 				}
-			}
-			if tmpl.IsWhatsappActive && wa != "" {
-				log.Printf("[Customer][WhatsApp placeholder] → %s: %s", wa, tmpl.WhatsappBody)
-			}
-		})
+			})
+		}
 	}
 
 	return repository.FindCustomerByID(customer.ID)
@@ -243,36 +222,14 @@ func ResendPassword(id string) error {
 		return errors.New("customer tidak memiliki email, tidak dapat mengirim password")
 	}
 
-	plainPassword := utils.GenerateRandomPassword()
-	hash, err := utils.HashPassword(plainPassword)
+	// Sends a new set-password link. The current password and sessions stay as they
+	// are until the customer uses the link (ResetPassword then ends old sessions).
+	link, err := issueSetPasswordLink(customer.ID)
 	if err != nil {
-		return errors.New("gagal memproses password")
+		return errors.New("gagal membuat link set password")
 	}
-
-	customer.PasswordHash = &hash
-	customer.TokenVersion++ // password diganti → sesi lama berakhir
-	if err := repository.UpdateCustomer(customer); err != nil {
-		return errors.New("gagal menyimpan password baru")
+	if err := sendWelcome(welcomeMessage{Email: *customer.Email, Name: customer.Name, Whatsapp: customer.Whatsapp, Link: link}); err != nil {
+		return errors.New("link set password dibuat, namun gagal mengirim email: " + err.Error())
 	}
-
-	email := *customer.Email
-	name := customer.Name
-	pwd := plainPassword
-	tmpl, tmplErr := ntService.GetRendered("customer_welcome", map[string]string{
-		"nama_customer": name,
-		"email":         email,
-		"password":      pwd,
-	})
-	if tmplErr != nil {
-		// Fallback ke fungsi email lama
-		if err := utils.SendCustomerPasswordEmail(email, name, pwd); err != nil {
-			return errors.New("password diperbarui, namun gagal mengirim email: " + err.Error())
-		}
-	} else if tmpl.IsEmailActive {
-		if err := utils.SendEmail(email, name, tmpl.EmailSubject, tmpl.EmailBody); err != nil {
-			return errors.New("password diperbarui, namun gagal mengirim email: " + err.Error())
-		}
-	}
-
 	return nil
 }

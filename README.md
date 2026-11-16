@@ -209,7 +209,7 @@ game_lounge_be/
 │   │   ├── controller/           # Customer CRUD + update-notes + resend-password
 │   │   ├── dto/                  # CreateCustomerRequest, UpdateCustomerRequest, CustomerListFilter
 │   │   ├── repository/           # SyncFavoriteRoomTypes, FindCustomerByEmail/Whatsapp
-│   │   └── service/              # Generate & hash password, send email (async)
+│   │   └── service/              # One-time set-password link (72h), send email (async)
 │   │
 │   ├── booking/
 │   │   ├── controller/           # Booking CRUD + dashboard + sessions-ending-soon + cancel/complete
@@ -257,7 +257,7 @@ game_lounge_be/
 │   ├── bcrypt.go                 # HashPassword, CheckPassword
 │   ├── response.go               # ResponseSuccess, ResponseError, ResponseSuccessPaginate, Meta
 │   ├── upload.go                 # SaveFileToAssets, InitAssetsDir, DeleteFile
-│   ├── email.go                  # dispatch, SendEmail (plain text→HTML), SendHTMLEmail, SendCustomerPasswordEmail
+│   ├── email.go                  # dispatch, SendEmail (plain text→HTML), SendHTMLEmail, SendCustomerSetPasswordEmail
 │   ├── email_templates.go        # BuildBookingEmailHTML, BuildVoucherEmailHTML (designed HTML fallback)
 │   ├── template_renderer.go      # RenderTemplate ({{var}} substitution), GetTemplateOrFallback
 │   └── password_generator.go     # GeneratePasswordFromName (character substitution + #Gl suffix)
@@ -462,12 +462,12 @@ Priority: **Global Holiday** → **Store Holiday** → **Regular Hours** (weekda
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/customers` | List customers (filter: search, type, store_id) |
-| POST | `/customers` | Create a customer |
+| POST | `/customers` | Create a customer. With an email, the customer gets a one-time set-password link (valid 72h) instead of a password |
 | GET | `/customers/:id` | Customer detail |
 | PUT | `/customers/:id` | Update a customer |
 | PATCH | `/customers/:id/notes` | Update internal customer notes |
 | DELETE | `/customers/:id` | Delete a customer (soft delete) |
-| POST | `/customers/:id/resend-password` | Resend the password email |
+| POST | `/customers/:id/resend-password` | Send a new set-password link (older unused links stop working; the current password stays until the link is used) |
 
 #### Bookings
 | Method | Endpoint | Description |

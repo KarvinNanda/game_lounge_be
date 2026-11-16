@@ -103,17 +103,13 @@ func SendHTMLEmail(toEmail, toName, subject, htmlContent string) error {
 	return dispatch(toEmail, toName, subject, htmlContent)
 }
 
-// SendCustomerPasswordEmail fallback jika template DB belum tersedia.
-func SendCustomerPasswordEmail(toEmail, customerName, password string) error {
-	subject := "Selamat Datang di Quantum Gaming Center – Akun Member Anda"
+// SendCustomerSetPasswordEmail is the fallback when the customer_welcome template
+// is missing or does not contain {{link_set_password}}.
+func SendCustomerSetPasswordEmail(toEmail, customerName, link string) error {
+	subject := "Selamat Datang di Quantum Gaming Center: Atur Password Akun Anda"
 	body := fmt.Sprintf(
-		"Halo %s,\n\nAkun member Anda telah berhasil dibuat.\n\nEmail    : %s\nPassword : %s\n\nSilakan gunakan password di atas untuk login.\nDemi keamanan, segera ganti password setelah login pertama.\n\nSalam,\nTim Quantum Gaming Center",
-		customerName, toEmail, password,
+		"Halo %s,\n\nAkun member Anda telah dibuat dengan email %s.\n\nKlik link berikut untuk membuat password:\n%s\n\nLink ini berlaku 72 jam dan hanya bisa dipakai 1 kali.\nJika link sudah tidak berlaku, minta link baru ke staf kami atau pakai fitur Lupa Password.\n\nSalam,\nTim Quantum Gaming Center",
+		customerName, toEmail, link,
 	)
 	return SendEmail(toEmail, customerName, subject, body)
-}
-
-// BuildWelcomeEmailBody dipertahankan untuk backward compatibility.
-func BuildWelcomeEmailBody(name, password string) string {
-	return fmt.Sprintf("Halo %s!\n\nPassword kamu: %s\n\nSalam,\nTim Quantum Gaming Center", name, password)
 }

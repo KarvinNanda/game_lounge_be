@@ -50,9 +50,9 @@ func Update(key string, req dto.UpdateTemplateRequest, updatedBy string) (*model
 func defaultSampleVars(key string) map[string]string {
 	samples := map[string]map[string]string{
 		"customer_welcome": {
-			"nama_customer": "Viking Pratama",
-			"email":         "viking@gmail.com",
-			"password":      "v1k1ng$#Gl",
+			"nama_customer":     "Viking Pratama",
+			"email":             "viking@gmail.com",
+			"link_set_password": "https://app.example.com/reset-password/contoh-token",
 		},
 		"voucher_notification": {
 			"nama_customer":     "Viking Pratama",

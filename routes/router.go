@@ -33,7 +33,9 @@ import (
 )
 
 func SetupRouter() *gin.Engine {
-	r := gin.Default()
+	// Not gin.Default(): its access log would print reset/recovery tokens from the URL path.
+	r := gin.New()
+	r.Use(middleware.RequestLogger(), gin.Recovery())
 
 	// ── Trusted proxies ───────────────────────────────────────
 	// Default: tidak percaya proxy manapun → ClientIP() tidak bisa dispoof

@@ -38,6 +38,9 @@ func ProductionConfigErrors() []string {
 	if os.Getenv("XENDIT_WEBHOOK_TOKEN") == "" {
 		errs = append(errs, "XENDIT_WEBHOOK_TOKEN kosong: webhook tidak bisa diverifikasi")
 	}
+	if os.Getenv("APP_URL") == "" {
+		errs = append(errs, "APP_URL kosong: link set password dan reset password di email tidak bisa dibuka")
+	}
 	if os.Getenv("COOKIE_SECURE") == "false" {
 		errs = append(errs, "COOKIE_SECURE=false: auth cookie bisa terkirim lewat HTTP")
 	}

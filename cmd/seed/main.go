@@ -702,9 +702,9 @@ func seed(tx *gorm.DB, hash string) {
 		{
 			NotificationKey: "customer_welcome", Name: "Selamat Datang Customer", Description: ptr("Dikirim saat akun customer dibuat."),
 			EmailSubject:       ptr("Selamat datang di Quantum Gaming Center"),
-			EmailBody:          ptr("Halo {{nama_customer}},\n\nAkun kamu sudah dibuat.\nEmail: {{email}}\nPassword: {{password}}\n\nSegera ganti password setelah login."),
-			WhatsappBody:       ptr("Halo {{nama_customer}}! Akun Quantum kamu sudah aktif. Email: {{email}}, Password: {{password}}"),
-			AvailableVariables: vars("nama_customer", "Nama Customer", "email", "Email", "password", "Password"),
+			EmailBody:          ptr("Halo {{nama_customer}},\n\nAkun kamu sudah dibuat.\nEmail: {{email}}\nAtur password: {{link_set_password}}\n\nLink berlaku 72 jam dan hanya bisa dipakai 1 kali."),
+			WhatsappBody:       ptr("Halo {{nama_customer}}! Akun Quantum kamu sudah aktif. Email: {{email}}, Atur password: {{link_set_password}}"),
+			AvailableVariables: vars("nama_customer", "Nama Customer", "email", "Email", "link_set_password", "Link Atur Password"),
 			IsEmailActive:      true, IsWhatsappActive: true, CreatedBy: a,
 		},
 		{
