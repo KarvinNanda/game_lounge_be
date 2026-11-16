@@ -618,7 +618,7 @@ Default **notification_key** values:
 | GET | `/room-recommendations` | Room recommendations |
 | GET | `/credits/expiring` | Play credits that will expire soon |
 | GET | `/my-credits` | The customer's play credits |
-| GET | `/vouchers/available` | Usable vouchers |
+| GET | `/vouchers/available` | Usable vouchers (query: `store_id`, `include_reserved=true` also lists vouchers held by a booking hold, with `reserved_until` and `hold_id`; the voucher comes back about 1 hour after the hold expires) |
 | POST | `/bookings/initiate` | Create a hold + Xendit invoice |
 | GET | `/bookings` | List bookings (query: `page`, `per_page` max 50, `status`) |
 | GET | `/bookings/by-hold/:hold_id` | Payment status of a hold, for the payment success page |
