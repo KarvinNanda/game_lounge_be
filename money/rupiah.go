@@ -86,3 +86,30 @@ func divRoundHalfUp(a, b int64) int64 {
 func PerHour(perHour Rupiah, minutes int) Rupiah {
 	return Rupiah(divRoundHalfUp(int64(perHour)*int64(minutes), 60))
 }
+
+// Thousands writes the amount with Indonesian thousand separators: 31000 -> "31.000".
+// For templates that already print "Rp" themselves.
+func Thousands(r Rupiah) string {
+	n := int64(r)
+	sign := ""
+	if n < 0 {
+		sign, n = "-", -n
+	}
+	s := strconv.FormatInt(n, 10)
+	var b strings.Builder
+	for i, d := range s {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			b.WriteByte('.')
+		}
+		b.WriteRune(d)
+	}
+	return sign + b.String()
+}
+
+// Format writes an amount for people: 31000 -> "Rp 31.000", -1500 -> "-Rp 1.500".
+func Format(r Rupiah) string {
+	if r < 0 {
+		return "-Rp " + Thousands(-r)
+	}
+	return "Rp " + Thousands(r)
+}

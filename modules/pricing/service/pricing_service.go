@@ -410,7 +410,7 @@ func CalculatePrice(req dto.CalculatePriceRequest) (*dto.CalculatePriceResponse,
 		breakdown = append(breakdown, dto.PriceBreakdownItem{
 			TimeRange:   fmt.Sprintf("%s - %s", utils.MinsToClock(fsOverlapStart), utils.MinsToClock(fsOverlapEnd)),
 			Type:        "Flash Sale",
-			Description: fmt.Sprintf("%s — %s Jam × Rp %d", flashSale.Name, formatHours(fsHours), flashSale.PricePerHour),
+			Description: fmt.Sprintf("%s — %s Jam × %s", flashSale.Name, formatHours(fsHours), money.Format(flashSale.PricePerHour)),
 			Amount:      fsTotal,
 		})
 
@@ -535,7 +535,7 @@ func priceNormalSegment(
 			items = append(items, dto.PriceBreakdownItem{
 				TimeRange:   fmt.Sprintf("%s - %s", utils.MinsToClock(slot.Start), utils.MinsToClock(slot.End)),
 				Type:        "Happy Hour",
-				Description: fmt.Sprintf("%s Jam × Rp %d", formatHours(hhHours), hhPrice.PricePerHour),
+				Description: fmt.Sprintf("%s Jam × %s", formatHours(hhHours), money.Format(hhPrice.PricePerHour)),
 				Amount:      hhTotal,
 			})
 		} else {

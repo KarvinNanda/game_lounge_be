@@ -114,3 +114,18 @@ func TestPerHour(t *testing.T) {
 		}
 	}
 }
+
+func TestFormat(t *testing.T) {
+	cases := map[Rupiah]string{
+		0: "Rp 0", 500: "Rp 500", 1000: "Rp 1.000", 31000: "Rp 31.000",
+		1234567: "Rp 1.234.567", -1500: "-Rp 1.500", 100000000: "Rp 100.000.000",
+	}
+	for in, want := range cases {
+		if got := Format(in); got != want {
+			t.Errorf("Format(%d) = %q, want %q", in, got, want)
+		}
+	}
+	if got := Thousands(31000); got != "31.000" {
+		t.Errorf("Thousands(31000) = %q", got)
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"game_lounge_be/models"
 	"game_lounge_be/modules/customer/dto"
 	"game_lounge_be/modules/customer/repository"
+	"game_lounge_be/money"
 	"game_lounge_be/utils"
 
 	"github.com/google/uuid"
@@ -15,18 +16,55 @@ import (
 
 // ── Get All ───────────────────────────────────────────────────────────────────
 
-func GetAllCustomers(filter dto.CustomerListFilter) ([]models.Customer, int64, error) {
-	return repository.FindAllCustomers(filter.Search, filter.Type, filter.Status, filter.Page, filter.PerPage)
+// CustomerWithStats is a customer plus the counters the admin app shows
+// (see repository.CustomerStats for the definitions). Customer fields stay at
+// the top level of the JSON.
+type CustomerWithStats struct {
+	models.Customer
+	TotalVisit   int64        `json:"total_visit"`
+	TotalBooking int64        `json:"total_booking"`
+	TotalSpent   money.Rupiah `json:"total_spent"`
+}
+
+func withStats(customers []models.Customer) ([]CustomerWithStats, error) {
+	ids := make([]string, len(customers))
+	for i, c := range customers {
+		ids[i] = c.ID
+	}
+	loc, _ := time.LoadLocation("Asia/Jakarta")
+	stats, err := repository.FindCustomerStats(ids, time.Now().In(loc).Format("2006-01-02"))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]CustomerWithStats, len(customers))
+	for i, c := range customers {
+		s := stats[c.ID]
+		out[i] = CustomerWithStats{Customer: c, TotalVisit: s.TotalVisit, TotalBooking: s.TotalBooking, TotalSpent: s.TotalSpent}
+	}
+	return out, nil
+}
+
+func GetAllCustomers(filter dto.CustomerListFilter) ([]CustomerWithStats, int64, error) {
+	customers, total, err := repository.FindAllCustomers(filter.Search, filter.Type, filter.Status, filter.Page, filter.PerPage)
+	if err != nil {
+		return nil, 0, err
+	}
+	out, err := withStats(customers)
+	return out, total, err
 }
 
 // ── Get By ID ─────────────────────────────────────────────────────────────────
 
-func GetCustomerByID(id string) (*models.Customer, error) {
+func GetCustomerByID(id string) (*CustomerWithStats, error) {
 	customer, err := repository.FindCustomerByID(id)
 	if err != nil {
 		return nil, errors.New("customer tidak ditemukan")
 	}
-	return customer, nil
+	out, err := withStats([]models.Customer{*customer})
+	if err != nil {
+		return nil, err
+	}
+	return &out[0], nil
 }
 
 // ── Create ────────────────────────────────────────────────────────────────────
