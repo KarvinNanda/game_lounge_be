@@ -24,6 +24,44 @@ import (
 // GetQuote — GET /public/booking/quote?store_id&room_template_id&booking_date&selected_slots[]=10:00
 // Harga final untuk slot yang dipilih, tanpa membuat hold. Logika sama dengan /bookings/initiate.
 func GetQuote(c *gin.Context) {
+	p, ok := quoteParams(c)
+	if !ok {
+		return
+	}
+	result, err := service.QuoteBooking(p.storeID, p.roomTemplateID, p.date, p.slots)
+	if err != nil {
+		utils.ResponseError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	utils.ResponseSuccess(c, http.StatusOK, "OK", result)
+}
+
+// GetCustomerQuote — GET /customer/bookings/quote (customer JWT). Same query as
+// the public quote plus an optional voucher_id. final_price equals total_price of
+// POST /customer/bookings/initiate for the same input; the voucher is not reserved.
+func GetCustomerQuote(c *gin.Context) {
+	p, ok := quoteParams(c)
+	if !ok {
+		return
+	}
+	result, err := service.QuoteBookingForCustomer(c.GetString("customer_id"), p.storeID, p.roomTemplateID, p.date, p.slots, c.Query("voucher_id"))
+	if err != nil {
+		utils.ResponseError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	utils.ResponseSuccess(c, http.StatusOK, "OK", result)
+}
+
+type quoteQuery struct {
+	storeID        string
+	roomTemplateID uint
+	date           string
+	slots          []string
+}
+
+// quoteParams reads and checks the shared quote query; on a bad request it
+// writes the 400 response and returns false.
+func quoteParams(c *gin.Context) (quoteQuery, bool) {
 	storeID := c.Query("store_id")
 	roomTemplateID, _ := strconv.Atoi(c.Query("room_template_id"))
 	date := c.Query("booking_date")
@@ -33,19 +71,13 @@ func GetQuote(c *gin.Context) {
 	}
 	if storeID == "" || roomTemplateID <= 0 || date == "" || len(slots) == 0 {
 		utils.ResponseError(c, http.StatusBadRequest, "store_id, room_template_id, booking_date, dan selected_slots[] wajib diisi")
-		return
+		return quoteQuery{}, false
 	}
 	if len(slots) > 24 {
 		utils.ResponseError(c, http.StatusBadRequest, "maksimal 24 slot")
-		return
+		return quoteQuery{}, false
 	}
-
-	result, err := service.QuoteBooking(storeID, uint(roomTemplateID), date, slots)
-	if err != nil {
-		utils.ResponseError(c, http.StatusBadRequest, err.Error())
-		return
-	}
-	utils.ResponseSuccess(c, http.StatusOK, "OK", result)
+	return quoteQuery{storeID: storeID, roomTemplateID: uint(roomTemplateID), date: date, slots: slots}, true
 }
 
 func GetAvailability(c *gin.Context) {
