@@ -14,6 +14,13 @@ func XenditMockMode() bool {
 	return os.Getenv("XENDIT_SECRET_KEY") == "" && !IsProduction()
 }
 
+// FnbEnabled turns the FnB feature on (routes and seed data) only when
+// FNB_ENABLED=true. Default is off because FnB is out of scope for now
+// (decision 2026-11-16). Code and tables stay, so it can be turned back on.
+func FnbEnabled() bool {
+	return os.Getenv("FNB_ENABLED") == "true"
+}
+
 // ProductionConfigErrors mengembalikan daftar config wajib yang salah saat
 // APP_ENV=production. Server harus menolak start jika daftar ini tidak kosong,
 // karena setiap item di bawah membuat sistem fail-open.

@@ -591,7 +591,7 @@ Default **notification_key** values:
 | GET | `/play-credits/packages` | Play credits packages |
 | GET | `/event-booking/availability` | Taken time ranges + `event_price` (query: `store_id`, `date`, optional `start_time`, `end_time`) |
 | GET | `/event-booking/quote` | Customer event price (query: `store_id`, `booking_date`, `start_time`, `end_time`) |
-| GET | `/fnb/menu` | FnB menu |
+| GET | `/fnb/menu` | FnB menu (only with `FNB_ENABLED=true`, otherwise 404) |
 
 > - Banner and room template responses use a field whitelist. Audit columns (`created_by`, `updated_by`, `deleted_by`, `deleted_at`) and `is_active` are not sent, because `created_by`/`updated_by` contain staff usernames.
 > - `/event-booking/quote` → `{store_id, booking_date, start_time, end_time, duration_hours, price_per_day, total_price, available}`. `total_price` is exactly what `/customer/event-bookings/initiate` charges (rounded to Rp 1,000). `available` = no conflict with regular bookings or other events right now.
@@ -625,8 +625,8 @@ Default **notification_key** values:
 | GET | `/bookings/:id` | Booking detail |
 | POST | `/play-credits/purchase/initiate` | Buy a play credits package (Xendit invoice) |
 | POST | `/event-bookings/initiate` | Create an event booking + Xendit invoice |
-| POST | `/fnb/orders` | Order FnB |
-| GET | `/fnb/orders` | FnB order history |
+| POST | `/fnb/orders` | Order FnB (only with `FNB_ENABLED=true`, otherwise 404) |
+| GET | `/fnb/orders` | FnB order history (only with `FNB_ENABLED=true`, otherwise 404) |
 
 The `.../mock-confirm` endpoints (booking, play credits, event) are registered only when `XENDIT_SECRET_KEY` is empty (dev mock mode).
 

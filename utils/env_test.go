@@ -68,3 +68,23 @@ func TestProductionConfigErrors(t *testing.T) {
 		}
 	})
 }
+
+func TestFnbEnabled(t *testing.T) {
+	cases := []struct {
+		env  string
+		want bool
+	}{
+		{"", false}, // default off: FnB is out of scope (decision 2026-11-16)
+		{"false", false},
+		{"yes", false},
+		{"true", true},
+	}
+	for _, tc := range cases {
+		t.Run("FNB_ENABLED="+tc.env, func(t *testing.T) {
+			t.Setenv("FNB_ENABLED", tc.env)
+			if got := FnbEnabled(); got != tc.want {
+				t.Errorf("want %v, got %v", tc.want, got)
+			}
+		})
+	}
+}

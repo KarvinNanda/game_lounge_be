@@ -636,53 +636,56 @@ func seed(tx *gorm.DB, hash string) {
 	}
 
 	// ── FnB ──────────────────────────────────────────────────
-	fnbCats := []string{"Minuman Dingin", "Kopi & Teh", "Makanan Berat", "Snack", "Dessert"}
-	var fnbCatIDs []uint
-	for i, n := range fnbCats {
-		c := models.FnbCategory{Name: n, SortOrder: i + 1, IsActive: true, CreatedBy: a}
-		must(tx.Create(&c).Error)
-		fnbCatIDs = append(fnbCatIDs, c.ID)
-	}
-	itemDefs := []struct {
-		cat   int
-		name  string
-		price float64
-		avail bool
-	}{
-		{0, "Es Teh Manis", 8000, true}, {0, "Coca-Cola", 12000, true}, {0, "Air Mineral", 6000, true},
-		{1, "Kopi Susu Gula Aren", 22000, true}, {1, "Matcha Latte", 25000, false},
-		{2, "Nasi Goreng Spesial", 35000, true}, {2, "Indomie Goreng Telur", 18000, true},
-		{3, "Kentang Goreng", 20000, true}, {3, "Chicken Wings", 30000, true},
-		{4, "Es Krim Vanilla", 15000, true},
-	}
-	var items []models.FnbItem
-	for i, d := range itemDefs {
-		it := models.FnbItem{CategoryID: fnbCatIDs[d.cat], Name: d.name, Description: ptr(d.name + " — favorit pengunjung."), Price: d.price, IsAvailable: d.avail, IsActive: true, SortOrder: i + 1, CreatedBy: a}
-		must(tx.Create(&it).Error)
-		items = append(items, it)
-	}
-	orderDefs := []struct {
-		booking int
-		status  string
-		lines   [][2]int // {item index, qty}
-	}{
-		{0, "delivered", [][2]int{{0, 2}, {7, 1}}},
-		{1, "delivered", [][2]int{{3, 2}, {8, 1}}},
-		{2, "delivered", [][2]int{{5, 1}, {1, 3}}},
-		{4, "cancelled", [][2]int{{6, 2}}},
-		{5, "preparing", [][2]int{{0, 1}, {6, 1}}},
-		{7, "pending", [][2]int{{9, 2}, {2, 2}}},
-	}
-	for _, d := range orderDefs {
-		b := bookings[d.booking]
-		o := models.FnbOrder{ID: uuid.NewString(), BookingID: b.ID, CustomerID: *b.CustomerID, StoreID: b.StoreID, RoomID: b.RoomID, Status: d.status}
-		for _, l := range d.lines {
-			o.TotalAmount += items[l[0]].Price * float64(l[1])
+	// Only with FNB_ENABLED=true: FnB is out of scope for now (decision 2026-11-16).
+	if utils.FnbEnabled() {
+		fnbCats := []string{"Minuman Dingin", "Kopi & Teh", "Makanan Berat", "Snack", "Dessert"}
+		var fnbCatIDs []uint
+		for i, n := range fnbCats {
+			c := models.FnbCategory{Name: n, SortOrder: i + 1, IsActive: true, CreatedBy: a}
+			must(tx.Create(&c).Error)
+			fnbCatIDs = append(fnbCatIDs, c.ID)
 		}
-		must(tx.Create(&o).Error)
-		for _, l := range d.lines {
-			it := items[l[0]]
-			must(tx.Create(&models.FnbOrderItem{OrderID: o.ID, ItemID: it.ID, ItemName: it.Name, Quantity: l[1], Price: it.Price}).Error)
+		itemDefs := []struct {
+			cat   int
+			name  string
+			price float64
+			avail bool
+		}{
+			{0, "Es Teh Manis", 8000, true}, {0, "Coca-Cola", 12000, true}, {0, "Air Mineral", 6000, true},
+			{1, "Kopi Susu Gula Aren", 22000, true}, {1, "Matcha Latte", 25000, false},
+			{2, "Nasi Goreng Spesial", 35000, true}, {2, "Indomie Goreng Telur", 18000, true},
+			{3, "Kentang Goreng", 20000, true}, {3, "Chicken Wings", 30000, true},
+			{4, "Es Krim Vanilla", 15000, true},
+		}
+		var items []models.FnbItem
+		for i, d := range itemDefs {
+			it := models.FnbItem{CategoryID: fnbCatIDs[d.cat], Name: d.name, Description: ptr(d.name + " — favorit pengunjung."), Price: d.price, IsAvailable: d.avail, IsActive: true, SortOrder: i + 1, CreatedBy: a}
+			must(tx.Create(&it).Error)
+			items = append(items, it)
+		}
+		orderDefs := []struct {
+			booking int
+			status  string
+			lines   [][2]int // {item index, qty}
+		}{
+			{0, "delivered", [][2]int{{0, 2}, {7, 1}}},
+			{1, "delivered", [][2]int{{3, 2}, {8, 1}}},
+			{2, "delivered", [][2]int{{5, 1}, {1, 3}}},
+			{4, "cancelled", [][2]int{{6, 2}}},
+			{5, "preparing", [][2]int{{0, 1}, {6, 1}}},
+			{7, "pending", [][2]int{{9, 2}, {2, 2}}},
+		}
+		for _, d := range orderDefs {
+			b := bookings[d.booking]
+			o := models.FnbOrder{ID: uuid.NewString(), BookingID: b.ID, CustomerID: *b.CustomerID, StoreID: b.StoreID, RoomID: b.RoomID, Status: d.status}
+			for _, l := range d.lines {
+				o.TotalAmount += items[l[0]].Price * float64(l[1])
+			}
+			must(tx.Create(&o).Error)
+			for _, l := range d.lines {
+				it := items[l[0]]
+				must(tx.Create(&models.FnbOrderItem{OrderID: o.ID, ItemID: it.ID, ItemName: it.Name, Quantity: l[1], Price: it.Price}).Error)
+			}
 		}
 	}
 
