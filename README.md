@@ -468,9 +468,9 @@ Priority: **Global Holiday** → **Store Holiday** → **Regular Hours** (weekda
 #### Customers
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/customers` | List customers (filter: search, type, store_id). Each row has `total_visit`, `total_booking`, `total_spent` (definitions in `repository.CustomerStats`) |
+| GET | `/customers` | List customers (filter: search, type, store_id). Each row has `total_visit`, `total_booking`, `total_spent`, `last_visit_date` (YYYY-MM-DD) and `last_visit_time` (HH:MM, start time; both null without a visit). Definitions in `repository.CustomerStats` |
 | POST | `/customers` | Create a customer. With an email, the customer gets a one-time set-password link (valid 72h) instead of a password |
-| GET | `/customers/:id` | Customer detail. Includes `total_visit`, `total_booking`, `total_spent` |
+| GET | `/customers/:id` | Customer detail. Includes `total_visit`, `total_booking`, `total_spent`, `last_visit_date`, `last_visit_time` |
 | PUT | `/customers/:id` | Update a customer |
 | PATCH | `/customers/:id/notes` | Update internal customer notes |
 | DELETE | `/customers/:id` | Delete a customer (soft delete) |

@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"log"
+	"strings"
 	"time"
 
 	"game_lounge_be/models"
@@ -24,6 +25,10 @@ type CustomerWithStats struct {
 	TotalVisit   int64        `json:"total_visit"`
 	TotalBooking int64        `json:"total_booking"`
 	TotalSpent   money.Rupiah `json:"total_spent"`
+	// Latest visit (same rule as total_visit): "YYYY-MM-DD" and start time "HH:MM".
+	// Both null when the customer has not visited yet.
+	LastVisitDate *string `json:"last_visit_date"`
+	LastVisitTime *string `json:"last_visit_time"`
 }
 
 func withStats(customers []models.Customer) ([]CustomerWithStats, error) {
@@ -40,6 +45,11 @@ func withStats(customers []models.Customer) ([]CustomerWithStats, error) {
 	for i, c := range customers {
 		s := stats[c.ID]
 		out[i] = CustomerWithStats{Customer: c, TotalVisit: s.TotalVisit, TotalBooking: s.TotalBooking, TotalSpent: s.TotalSpent}
+		if s.LastVisit != nil {
+			if date, clock, ok := strings.Cut(*s.LastVisit, " "); ok {
+				out[i].LastVisitDate, out[i].LastVisitTime = &date, &clock
+			}
+		}
 	}
 	return out, nil
 }
