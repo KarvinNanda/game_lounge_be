@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"time"
@@ -15,6 +16,9 @@ import (
 )
 
 func main() {
+	// JSON logs: one event per line; log.Printf calls go through it too.
+	slog.SetDefault(utils.NewJSONLogger(os.Stdout))
+
 	if err := godotenv.Load("../.env"); err != nil {
 		log.Println("No .env file found, using environment variables")
 	}

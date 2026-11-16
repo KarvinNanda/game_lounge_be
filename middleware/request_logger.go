@@ -1,10 +1,11 @@
 package middleware
 
 import (
-	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"regexp"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -17,20 +18,44 @@ func redactPathTokens(path string) string {
 	return pathTokenRE.ReplaceAllString(path, "${1}[REDACTED]")
 }
 
-// RequestLogger is gin's access log with tokens removed from the path.
-// Use it with gin.New() instead of gin.Default().
+// RequestLogger writes one JSON event per request: request_id, user_id and
+// user_type (staff or customer, set by the auth middlewares), method, path
+// (tokens redacted, no query string), status and latency. Level follows the
+// status: 5xx ERROR, 4xx WARN, else INFO. Use with gin.New() after RequestID().
 func RequestLogger() gin.HandlerFunc {
 	return requestLoggerTo(os.Stdout)
 }
 
 func requestLoggerTo(w io.Writer) gin.HandlerFunc {
-	return gin.LoggerWithConfig(gin.LoggerConfig{
-		Output: w,
-		Formatter: func(p gin.LogFormatterParams) string {
-			return fmt.Sprintf("[GIN] %v | %3d | %13v | %15s | %-7s %#v\n%s",
-				p.TimeStamp.Format("2006/01/02 - 15:04:05"),
-				p.StatusCode, p.Latency, p.ClientIP, p.Method,
-				redactPathTokens(p.Path), p.ErrorMessage)
-		},
-	})
+	logger := slog.New(slog.NewJSONHandler(w, nil))
+	return func(c *gin.Context) {
+		start := time.Now()
+		c.Next()
+
+		status := c.Writer.Status()
+		level := slog.LevelInfo
+		switch {
+		case status >= 500:
+			level = slog.LevelError
+		case status >= 400:
+			level = slog.LevelWarn
+		}
+		attrs := []slog.Attr{
+			slog.String("request_id", c.GetString("request_id")),
+			slog.String("method", c.Request.Method),
+			slog.String("path", redactPathTokens(c.Request.URL.Path)),
+			slog.Int("status", status),
+			slog.Float64("latency_ms", float64(time.Since(start).Microseconds())/1000),
+			slog.String("client_ip", c.ClientIP()),
+		}
+		if id := c.GetString("staff_id"); id != "" {
+			attrs = append(attrs, slog.String("user_id", id), slog.String("user_type", "staff"))
+		} else if id := c.GetString("customer_id"); id != "" {
+			attrs = append(attrs, slog.String("user_id", id), slog.String("user_type", "customer"))
+		}
+		if len(c.Errors) > 0 {
+			attrs = append(attrs, slog.String("error", c.Errors.String()))
+		}
+		logger.LogAttrs(c.Request.Context(), level, "request", attrs...)
+	}
 }
