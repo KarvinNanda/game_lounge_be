@@ -554,3 +554,28 @@ func TestCustomerAuth_Revocation(t *testing.T) {
 		})
 	}
 }
+
+// The admin app sends X-Request-ID and reads it back from the response, so the
+// preflight must allow it and normal responses must expose it.
+func TestCORS_RequestIDAllowedAndExposed(t *testing.T) {
+	t.Setenv("ALLOWED_ORIGINS", "")
+	r := newEngine(CORSMiddleware())
+
+	pre := httptest.NewRecorder()
+	req := httptest.NewRequest("OPTIONS", "/ping", nil)
+	req.Header.Set("Origin", "http://localhost:5173")
+	req.Header.Set("Access-Control-Request-Method", "GET")
+	req.Header.Set("Access-Control-Request-Headers", "x-request-id")
+	r.ServeHTTP(pre, req)
+	if !strings.Contains(strings.ToLower(pre.Header().Get("Access-Control-Allow-Headers")), "x-request-id") {
+		t.Errorf("preflight Allow-Headers = %q, must include X-Request-ID", pre.Header().Get("Access-Control-Allow-Headers"))
+	}
+
+	w := httptest.NewRecorder()
+	get := httptest.NewRequest("GET", "/ping", nil)
+	get.Header.Set("Origin", "http://localhost:5173")
+	r.ServeHTTP(w, get)
+	if !strings.Contains(strings.ToLower(w.Header().Get("Access-Control-Expose-Headers")), "x-request-id") {
+		t.Errorf("Expose-Headers = %q, must include X-Request-ID", w.Header().Get("Access-Control-Expose-Headers"))
+	}
+}

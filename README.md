@@ -707,7 +707,7 @@ Trigger (create booking / create voucher / create customer)
 
 Server logs are JSON, one event per line (`log/slog`). `cmd/main.go` installs the JSON handler with `slog.SetDefault`, so existing `log.Printf` calls are JSON too.
 
-- **Request ID:** `middleware.RequestID` keeps a client `X-Request-ID` if it is 1 to 64 letters, digits, `-` or `_`; otherwise it generates one. The id is returned in the `X-Request-ID` response header.
+- **Request ID:** `middleware.RequestID` keeps a client `X-Request-ID` if it is 1 to 64 letters, digits, `-` or `_`; otherwise it generates one. The id is returned in the `X-Request-ID` response header. CORS allows the header in requests and exposes it in responses (`Access-Control-Expose-Headers`), so browser code can send and read it.
 - **Access log:** one `"msg":"request"` event per request with `request_id`, `user_id` and `user_type` (staff or customer, when authenticated), `method`, `path` (reset and admin-recovery tokens redacted, no query string), `status`, `latency_ms`, `client_ip`. Level: 5xx `ERROR`, 4xx `WARN`, else `INFO`.
 - **Limit:** application log lines (`log.Printf`) do not carry `request_id` yet; match them by time.
 - Set `GIN_MODE=release` in production; debug mode prints non-JSON route lines at startup.
