@@ -54,7 +54,11 @@ DB_NAME=game_lounge_db
 JWT_SECRET=replace_with_output_of_openssl_rand_hex_32   # at least 32 characters; the server rejects short secrets
 JWT_EXPIRED_HOURS=24
 
-# SMTP (customer password emails & notifications)
+# Frontend URLs used in links
+APP_URL=http://localhost:5174        # customer app: Xendit redirects, customer reset/set-password links
+ADMIN_APP_URL=http://localhost:5173  # admin app: /admin-recovery/{token} links (super admin forgot password, staff reset)
+
+# SMTP (customer set-password links & notifications)
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_FROM=noreply@gamelounge.com       # sender address (required)
@@ -300,7 +304,7 @@ The staff tables below are relative to `/api/admin` (example: `/stores` = `/api/
 | POST | `/auth/login` | Login; the server sets the `staff_token` cookie |
 | POST | `/admin-recovery/request` | Send a password reset link to the super admin email |
 | GET | `/admin-recovery/:token/validate` | Validate the token before the reset form is shown |
-| POST | `/admin-recovery/:token/reset` | Reset the super admin password with a valid token |
+| POST | `/admin-recovery/:token/reset` | Set a new password with a valid token: super admin forgot-password links, and staff links created by `POST /staffs/:id/reset-password` |
 
 > **Admin Recovery**: the `/request` response is always the same (200 OK), so an attacker cannot tell whether an email is registered. Rate limit: max 3 requests/hour per IP. The token is valid for 15 minutes and can be used only once.
 
@@ -340,7 +344,7 @@ Response:
 | GET | `/staffs/:id` | Staff detail |
 | PUT | `/staffs/:id` | Update staff |
 | DELETE | `/staffs/:id` | Delete staff (soft delete) |
-| POST | `/staffs/:id/reset-password` | Reset a staff password and send an email (Super Admin only) |
+| POST | `/staffs/:id/reset-password` | Super Admin only. The old password stops working and all sessions end; the staff gets a one-time `{ADMIN_APP_URL}/admin-recovery/{token}` link (valid 24h). No password is emailed. If the email fails the request returns an error |
 
 #### Facility Categories
 | Method | Endpoint | Description |

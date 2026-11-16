@@ -1,11 +1,13 @@
 package dto
 
 type CreateStaffRequest struct {
-	RoleID      uint     `json:"role_id" binding:"required"`
-	Username    string   `json:"username" binding:"required,min=3,max=100"`
-	Email       string   `json:"email" binding:"required,email"`
-	Phone       string   `json:"phone"`
-	Password    string   `json:"password" binding:"required,min=6"`
+	RoleID   uint   `json:"role_id" binding:"required"`
+	Username string `json:"username" binding:"required,min=3,max=100"`
+	Email    string `json:"email" binding:"required,email"`
+	Phone    string `json:"phone"`
+	// Optional. Without it the staff gets an invite link to set their own
+	// password (preferred: the admin never knows it).
+	Password    string   `json:"password" binding:"omitempty,min=6"`
 	IsAllStores bool     `json:"is_all_stores"`
 	StoreIDs    []string `json:"store_ids"`
 }

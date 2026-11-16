@@ -87,3 +87,43 @@ func ConsumeTokenAndSetPassword(token, staffID, hashedPassword string) error {
 			}).Error
 	})
 }
+
+// StaffResetMarker fills ip_address for links a super admin creates for a staff
+// (POST /staffs/:id/reset-password). It never equals a real IP, so it does not
+// count toward the forgot-password limit, and it lets ResetPassword accept the
+// token for a staff that is not a super admin.
+const StaffResetMarker = "staff-reset"
+
+// FindActiveStaff returns a staff that is not deleted.
+func FindActiveStaff(id string) (*models.Staff, error) {
+	var s models.Staff
+	err := config.DB.Where("id = ? AND deleted_at IS NULL", id).First(&s).Error
+	return &s, err
+}
+
+// IssueStaffResetToken, in one transaction: revokes the staff's unused links,
+// replaces the password with an unusable hash, ends all sessions, and stores the
+// hash of the new link token.
+func IssueStaffResetToken(staffID, token, unusableHash string, ttl time.Duration) error {
+	return config.DB.Transaction(func(tx *gorm.DB) error {
+		now := time.Now()
+		if err := tx.Model(&models.PasswordResetToken{}).
+			Where("staff_id = ? AND used_at IS NULL", staffID).
+			Update("used_at", now).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&models.Staff{}).Where("id = ?", staffID).
+			Updates(map[string]interface{}{
+				"password_hash": unusableHash,
+				"token_version": gorm.Expr("token_version + 1"),
+			}).Error; err != nil {
+			return err
+		}
+		return tx.Create(&models.PasswordResetToken{
+			StaffID:   staffID,
+			Token:     utils.HashToken(token),
+			IPAddress: StaffResetMarker,
+			ExpiresAt: now.Add(ttl),
+		}).Error
+	})
+}

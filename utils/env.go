@@ -41,6 +41,9 @@ func ProductionConfigErrors() []string {
 	if os.Getenv("APP_URL") == "" {
 		errs = append(errs, "APP_URL kosong: link set password dan reset password di email tidak bisa dibuka")
 	}
+	if os.Getenv("ADMIN_APP_URL") == "" {
+		errs = append(errs, "ADMIN_APP_URL kosong: link reset password staff dan super admin tidak bisa dibuka")
+	}
 	if os.Getenv("COOKIE_SECURE") == "false" {
 		errs = append(errs, "COOKIE_SECURE=false: auth cookie bisa terkirim lewat HTTP")
 	}

@@ -1,12 +1,14 @@
 package service
 
 import (
+	"fmt"
+	adminRecoveryService "game_lounge_be/modules/admin_recovery/service"
+
 	"errors"
 	"game_lounge_be/models"
 	"game_lounge_be/modules/staff/dto"
 	"game_lounge_be/modules/staff/repository"
 	"game_lounge_be/utils"
-	"log"
 	"time"
 
 	"github.com/google/uuid"
@@ -42,7 +44,18 @@ func CreateStaff(req dto.CreateStaffRequest, actor Actor) (*models.Staff, error)
 		return nil, errors.New("email sudah digunakan")
 	}
 
-	hash, err := utils.HashPassword(req.Password)
+	// Without a password the staff sets one through an invite link. Check the
+	// link can be built before creating anything.
+	invite := req.Password == ""
+	var hash string
+	if invite {
+		if err := adminRecoveryService.StaffLinksConfigured(); err != nil {
+			return nil, err
+		}
+		hash, err = adminRecoveryService.UnusablePasswordHash()
+	} else {
+		hash, err = utils.HashPassword(req.Password)
+	}
 	if err != nil {
 		return nil, errors.New("gagal memproses password")
 	}
@@ -67,8 +80,22 @@ func CreateStaff(req dto.CreateStaffRequest, actor Actor) (*models.Staff, error)
 		repository.SyncStaffStores(staff.ID, req.StoreIDs)
 	}
 
-	return repository.FindStaffByID(staff.ID)
+	created, err := repository.FindStaffByID(staff.ID)
+	if err != nil {
+		return nil, err
+	}
+	if invite {
+		if err := adminRecoveryService.IssueStaffInvite(staff.ID); err != nil {
+			// The staff exists; only the email failed. The caller still gets it.
+			return created, fmt.Errorf("%w: %v", ErrInviteNotSent, err)
+		}
+	}
+	return created, nil
 }
+
+// ErrInviteNotSent: the staff was created but the invite email failed.
+// The super admin can send a new link with "Reset Password".
+var ErrInviteNotSent = errors.New("staff dibuat, tapi link atur password belum terkirim")
 
 func UpdateStaff(id string, req dto.UpdateStaffRequest, actor Actor) (*models.Staff, error) {
 	staff, err := repository.FindStaffByID(id)
@@ -138,39 +165,21 @@ type ResetPasswordResult struct {
 	Message  string `json:"message"`
 }
 
-// ResetStaffPassword generate password acak baru, simpan ke DB, kirim ke email staff.
+// ResetStaffPassword: the old password stops working, all sessions end, and the
+// staff gets a one-time link (24h) to set a new password. No password is ever
+// generated or emailed. See adminRecoveryService.IssueStaffPasswordReset.
 func ResetStaffPassword(staffID string) (*ResetPasswordResult, error) {
 	staff, err := repository.FindStaffByID(staffID)
 	if err != nil {
 		return nil, errors.New("staff tidak ditemukan")
 	}
-
-	newPassword := utils.GenerateRandomPassword()
-
-	hashedPassword, err := utils.HashPassword(newPassword)
-	if err != nil {
-		return nil, errors.New("gagal memproses password baru")
+	if err := adminRecoveryService.IssueStaffPasswordReset(staff.ID); err != nil {
+		return nil, err
 	}
-
-	if err := repository.UpdatePassword(staff.ID, hashedPassword); err != nil {
-		return nil, errors.New("gagal menyimpan password baru")
-	}
-
-	// Kirim email ke staff (async)
-	username := staff.Username
-	email := staff.Email
-	utils.SafeGo(func() {
-		subject := "Password Akun Quantum Anda Telah Direset"
-		body := "Halo " + username + "!\n\nPassword akun Quantum Playstation Rental kamu telah direset oleh Super Admin.\n\nBerikut password baru kamu:\nUsername : " + username + "\nPassword : " + newPassword + "\n\nSegera login dan ganti password kamu setelah masuk.\n\nSalam,\nTim Quantum Gaming Center"
-		if err := utils.SendEmail(email, username, subject, body); err != nil {
-			log.Printf("[Staff] gagal kirim email reset password ke %s: %v", email, err)
-		}
-	})
-
 	return &ResetPasswordResult{
 		StaffID:  staff.ID,
 		Username: staff.Username,
 		Email:    staff.Email,
-		Message:  "Password baru telah dikirim ke " + staff.Email,
+		Message:  "Link atur password baru telah dikirim ke " + staff.Email,
 	}, nil
 }
