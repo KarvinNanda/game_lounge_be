@@ -21,10 +21,11 @@ type PlayCreditsPackage struct {
 	ApplyToAllStores bool         `gorm:"default:false" json:"apply_to_all_stores"`
 	CreatedBy        *string      `gorm:"size:255" json:"created_by"`
 	UpdatedBy        *string      `gorm:"size:255" json:"updated_by"`
-	DeletedBy        *string      `gorm:"size:255" json:"deleted_by"`
-	CreatedAt        time.Time    `json:"created_at"`
-	UpdatedAt        time.Time    `json:"updated_at"`
-	DeletedAt        *time.Time   `gorm:"index" json:"deleted_at"`
+	AuditNames       `gorm:"-"`
+	DeletedBy        *string    `gorm:"size:255" json:"deleted_by"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
+	DeletedAt        *time.Time `gorm:"index" json:"deleted_at"`
 
 	PackageStores []PlayCreditsPackageStore `gorm:"foreignKey:PackageID" json:"package_stores,omitempty"`
 }

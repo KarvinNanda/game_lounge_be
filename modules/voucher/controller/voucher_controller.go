@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"game_lounge_be/audit"
+
 	"net/http"
 	"strconv"
 
@@ -33,6 +35,7 @@ func GetAll(c *gin.Context) {
 		totalPage++
 	}
 
+	audit.ApplySlice(vouchers)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "OK",
@@ -53,6 +56,7 @@ func GetByID(c *gin.Context) {
 		utils.ResponseError(c, http.StatusNotFound, err.Error())
 		return
 	}
+	audit.Apply(voucher)
 	utils.ResponseSuccess(c, http.StatusOK, "OK", voucher)
 }
 

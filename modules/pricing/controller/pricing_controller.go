@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"game_lounge_be/audit"
+
 	"net/http"
 	"strconv"
 
@@ -209,6 +211,7 @@ func GetFlashSales(c *gin.Context) {
 		utils.ResponseError(c, http.StatusInternalServerError, "Gagal mengambil flash sale")
 		return
 	}
+	audit.ApplySlice(sales)
 	utils.ResponseSuccess(c, http.StatusOK, "OK", sales)
 }
 

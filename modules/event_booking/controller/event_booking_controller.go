@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"game_lounge_be/audit"
+
 	"game_lounge_be/money"
 
 	"net/http"
@@ -35,6 +37,7 @@ func GetAll(c *gin.Context) {
 	if int(total)%filter.PerPage != 0 {
 		totalPage++
 	}
+	audit.ApplySlice(bookings)
 	utils.ResponseSuccessPaginate(c, http.StatusOK, "OK", bookings, utils.Meta{
 		Page: filter.Page, PerPage: filter.PerPage, Total: total, TotalPage: totalPage,
 	})
@@ -47,6 +50,7 @@ func GetByID(c *gin.Context) {
 		utils.ResponseError(c, http.StatusNotFound, err.Error())
 		return
 	}
+	audit.Apply(b)
 	utils.ResponseSuccess(c, http.StatusOK, "OK", b)
 }
 

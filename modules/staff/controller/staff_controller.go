@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"game_lounge_be/audit"
+
 	"errors"
 	"game_lounge_be/modules/staff/dto"
 	"game_lounge_be/modules/staff/service"
@@ -31,6 +33,7 @@ func GetAll(c *gin.Context) {
 		totalPage++
 	}
 
+	audit.ApplySlice(staffs)
 	utils.ResponseSuccessPaginate(c, http.StatusOK, "OK", staffs, utils.Meta{
 		Page: filter.Page, PerPage: filter.PerPage, Total: total, TotalPage: totalPage,
 	})
@@ -43,6 +46,7 @@ func GetByID(c *gin.Context) {
 		utils.ResponseError(c, http.StatusNotFound, err.Error())
 		return
 	}
+	audit.Apply(staff)
 	utils.ResponseSuccess(c, http.StatusOK, "OK", staff)
 }
 
