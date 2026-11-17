@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"game_lounge_be/audit"
+
 	"encoding/json"
 	"net/http"
 
@@ -35,6 +37,7 @@ func GetAllPackages(c *gin.Context) {
 		totalPage++
 	}
 
+	audit.ApplySlice(packages)
 	utils.ResponseSuccessPaginate(c, http.StatusOK, "OK", packages, utils.Meta{
 		Page: filter.Page, PerPage: filter.PerPage, Total: total, TotalPage: totalPage,
 	})
@@ -47,6 +50,7 @@ func GetActivePackages(c *gin.Context) {
 		utils.ResponseError(c, http.StatusInternalServerError, "Gagal mengambil paket aktif")
 		return
 	}
+	audit.ApplySlice(packages)
 	utils.ResponseSuccess(c, http.StatusOK, "OK", packages)
 }
 
@@ -58,6 +62,7 @@ func GetPackageByID(c *gin.Context) {
 		utils.ResponseError(c, http.StatusNotFound, err.Error())
 		return
 	}
+	audit.Apply(pkg)
 	utils.ResponseSuccess(c, http.StatusOK, "OK", pkg)
 }
 

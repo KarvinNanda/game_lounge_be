@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"game_lounge_be/audit"
+
 	"net/http"
 	"strconv"
 	"game_lounge_be/modules/role/dto"
@@ -34,6 +36,7 @@ func GetAll(c *gin.Context) {
 		totalPage++
 	}
 
+	audit.ApplySlice(roles)
 	utils.ResponseSuccessPaginate(c, http.StatusOK, "OK", roles, utils.Meta{
 		Page: filter.Page, PerPage: filter.PerPage, Total: total, TotalPage: totalPage,
 	})
@@ -52,6 +55,7 @@ func GetByID(c *gin.Context) {
 		return
 	}
 
+	audit.Apply(role)
 	utils.ResponseSuccess(c, http.StatusOK, "OK", role)
 }
 

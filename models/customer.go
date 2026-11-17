@@ -20,6 +20,7 @@ type Customer struct {
 	TokenVersion uint       `gorm:"not null;default:0" json:"-"` // naik saat logout/ganti password → JWT lama ditolak
 	CreatedBy    *string    `gorm:"size:255" json:"created_by"`
 	UpdatedBy    *string    `gorm:"size:255" json:"updated_by"`
+	AuditNames   `gorm:"-"`
 	DeletedBy    *string    `gorm:"size:255" json:"deleted_by"`
 	CreatedAt    time.Time  `json:"created_at"`
 	UpdatedAt    time.Time  `json:"updated_at"`

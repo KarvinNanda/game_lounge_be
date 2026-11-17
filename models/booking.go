@@ -38,8 +38,9 @@ type Booking struct {
 	HoldID           *string      `gorm:"type:char(36);index" json:"-"` // hold asal (booking online); untuk /customer/bookings/by-hold
 	CreatedBy        *string      `gorm:"size:255" json:"created_by"`
 	UpdatedBy        *string      `gorm:"size:255" json:"updated_by"`
-	CreatedAt        time.Time    `json:"created_at"`
-	UpdatedAt        time.Time    `json:"updated_at"`
+	AuditNames       `gorm:"-"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 
 	Store    Store     `gorm:"foreignKey:StoreID" json:"store,omitempty"`
 	Room     StoreRoom `gorm:"foreignKey:RoomID" json:"room,omitempty"`

@@ -735,10 +735,12 @@ Every record has these columns:
 
 | Column | Content |
 |--------|---------|
-| `created_by` | Username of the staff who created it |
+| `created_by` | Username of the staff who created it; `seed` for seed data; the customer id for bookings and event bookings a customer made online |
 | `updated_by` | Username of the staff who last updated it |
 | `deleted_by` | Username of the staff who deleted it |
 | `deleted_at` | Soft delete timestamp (null = active) |
+
+**Display names:** admin list and detail endpoints for bookings, event bookings, vouchers, roles, staff, customers, flash sales and play credit packages also return `created_by_name` and `updated_by_name` (package `audit`): a staff id becomes the username, a customer id becomes the customer name (deleted customers included), anything else (a username, `seed`) is shown as is. The fields are present when the matching column is set and omitted otherwise. They are not stored.
 
 > **Bookings** do not use soft delete. Records are permanent because they are financial records.
 
